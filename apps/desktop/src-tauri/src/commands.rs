@@ -691,6 +691,20 @@ pub async fn folder_delete(app: AppHandle, rel: String) -> Result<bool, String> 
     })
 }
 
+/// Whether a folder holds anything besides .DS_Store — the frontend asks before
+/// deleting so empty folders trash silently while non-empty ones get a confirm dialog
+#[tauri::command]
+pub async fn folder_has_content(app: AppHandle, rel: String) -> Result<bool, String> {
+    if rel.is_empty() || rel.split('/').any(|c| c == "..") {
+        return Err("不能删除此目录".to_string());
+    }
+    let lib = app.state::<AppState>().lib()?;
+    let rd = std::fs::read_dir(lib.abs(&rel)).map_err(|e| e.to_string())?;
+    Ok(rd
+        .filter_map(|e| e.ok())
+        .any(|e| e.file_name().to_string_lossy() != ".DS_Store"))
+}
+
 #[tauri::command]
 pub async fn folder_duplicate(app: AppHandle, rel: String) -> Result<String, String> {
     let lib = app.state::<AppState>().lib()?;

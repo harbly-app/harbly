@@ -43,8 +43,7 @@ function dropHandlers(rel: string) {
 
 function gotoFolder(rel: string) {
   if (dragJustEnded()) return;
-  st().closeViewer();
-  st().setFolder(rel);
+  st().focusFolder(rel); // navigation + arms Cmd+Backspace folder deletion
 }
 
 export default function Sidebar() {
@@ -270,7 +269,7 @@ function TreeRow(props: {
               danger
               icon={<Trash2 className="w-3.5 h-3.5" />}
               label={t("trash")}
-              onClick={() => st().doDeleteFolder(node.rel)}
+              onClick={() => st().requestDeleteFolder(node.rel)}
             />
           </CM.Content>
         </CM.Portal>

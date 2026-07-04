@@ -35,6 +35,7 @@ export default function Modals() {
         {modal.kind === "move" && <Move />}
         {modal.kind === "newFolder" && <NewFolder />}
         {modal.kind === "tags" && <Tags />}
+        {modal.kind === "confirmDeleteFolder" && <ConfirmDeleteFolder />}
         {modal.kind === "settings" && <Settings />}
       </div>
     </div>
@@ -45,7 +46,13 @@ function Title({ children }: { children: React.ReactNode }) {
   return <div className="text-[14px] font-extrabold mb-3">{children}</div>;
 }
 
-function Buttons(props: { okLabel: string; danger?: boolean; onOk: () => void; okDisabled?: boolean }) {
+function Buttons(props: {
+  okLabel: string;
+  danger?: boolean;
+  onOk: () => void;
+  okDisabled?: boolean;
+  autoFocusOk?: boolean;
+}) {
   const setModal = useStore((s) => s.setModal);
   const t = makeT(useStore((s) => s.lang));
   return (
@@ -57,6 +64,7 @@ function Buttons(props: { okLabel: string; danger?: boolean; onOk: () => void; o
         {t("cancel")}
       </button>
       <button
+        autoFocus={props.autoFocusOk}
         onClick={props.onOk}
         disabled={props.okDisabled}
         className={`h-8 px-3.5 rounded-ctl text-xs font-bold text-white transition disabled:opacity-40 ${
@@ -136,6 +144,29 @@ function NewFolder() {
         className="w-full h-9 px-3 rounded-ctl border border-line bg-side outline-none focus:border-primary text-[13px]"
       />
       <Buttons okLabel={t("create")} onOk={ok} okDisabled={!name.trim()} />
+    </>
+  );
+}
+
+function ConfirmDeleteFolder() {
+  const modal = useStore((s) => s.modal);
+  const setModal = useStore((s) => s.setModal);
+  const doDeleteFolder = useStore((s) => s.doDeleteFolder);
+  const t = makeT(useStore((s) => s.lang));
+  const m = modal?.kind === "confirmDeleteFolder" ? modal : null;
+  if (!m) return null;
+
+  const ok = () => {
+    setModal(null);
+    doDeleteFolder(m.rel);
+  };
+
+  return (
+    <>
+      <Title>{t("confirmDelFolderTitle")}</Title>
+      <div className="text-[12.5px] text-sub2 leading-relaxed">{t("confirmDelFolderBody", { name: m.label })}</div>
+      {/* autoFocus lands Enter on the destructive button (the requested fast-confirm); Esc closes via the global handler */}
+      <Buttons okLabel={t("confirmDelete")} danger autoFocusOk onOk={ok} />
     </>
   );
 }

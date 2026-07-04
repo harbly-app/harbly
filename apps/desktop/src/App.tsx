@@ -124,6 +124,10 @@ export default function App() {
               ? [st.viewerAsset.id]
               : [];
           if (ids.length) st.doTrash(ids);
+          // Folder deletion only when armed by an explicit sidebar folder click — an empty
+          // selection after deleting files must NOT fall through to the folder
+          // (root / inbox / tag views are additionally rejected inside requestDeleteFolder)
+          else if (st.folderArmed) st.requestDeleteFolder(st.folder);
           break;
         }
       }

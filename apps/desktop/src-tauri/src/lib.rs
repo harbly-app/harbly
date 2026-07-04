@@ -42,6 +42,7 @@ pub fn run() {
             commands::create_folder,
             commands::folder_rename,
             commands::folder_delete,
+            commands::folder_has_content,
             commands::folder_duplicate,
             commands::asset_duplicate,
             commands::list_versions,

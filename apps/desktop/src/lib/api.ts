@@ -50,6 +50,7 @@ export const api = {
   folderRename: (rel: string, newName: string) =>
     invoke<string>("folder_rename", { rel, newName }),
   folderDelete: (rel: string) => invoke<boolean>("folder_delete", { rel }),
+  folderHasContent: (rel: string) => invoke<boolean>("folder_has_content", { rel }),
   folderDuplicate: (rel: string) => invoke<string>("folder_duplicate", { rel }),
   assetDuplicate: (id: string) => invoke<AssetMeta>("asset_duplicate", { id }),
   setTags: (id: string, tags: string[]) => invoke<void>("set_tags", { id, tags }),

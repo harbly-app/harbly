@@ -9,6 +9,7 @@ export type Modal =
   | { kind: "move"; ids: string[]; label: string; fromFolder: string | null }
   | { kind: "newFolder"; parent: string }
   | { kind: "tags"; asset: AssetMeta }
+  | { kind: "confirmDeleteFolder"; rel: string; label: string }
   | { kind: "settings" };
 
 export interface DragPayload {
@@ -42,6 +43,8 @@ interface S {
   selIds: string[];
   /** Anchor for Shift range selection */
   anchorId: string | null;
+  /** Cmd+Backspace may delete the current folder ONLY after an explicit sidebar folder click; any grid interaction disarms it */
+  folderArmed: boolean;
   /** Asset / folder currently being renamed in place */
   editingAsset: string | null;
   editingFolder: string | null;
@@ -78,6 +81,8 @@ interface S {
   doMove(ids: string[], dest: string): Promise<void>;
   doCreateFolder(parent: string, name: string): Promise<void>;
   doRenameFolder(rel: string, name: string): Promise<void>;
+  focusFolder(rel: string): void;
+  requestDeleteFolder(rel: string): Promise<void>;
   doDeleteFolder(rel: string): Promise<void>;
   doDuplicateFolder(rel: string): Promise<void>;
   doDuplicateAsset(id: string): Promise<void>;
@@ -147,6 +152,7 @@ export const useStore = create<S>((set, get) => ({
   assets: [],
   selIds: [],
   anchorId: null,
+  folderArmed: false,
   editingAsset: null,
   editingFolder: null,
   viewerAsset: null,
@@ -232,7 +238,7 @@ export const useStore = create<S>((set, get) => ({
   },
 
   setFolder: (rel) => {
-    set({ folder: rel, selIds: [], anchorId: null, editingAsset: null, editingFolder: null });
+    set({ folder: rel, selIds: [], anchorId: null, editingAsset: null, editingFolder: null, folderArmed: false });
     fetchAssets(rel, get().sort)
       .then((assets) => {
         if (get().folder === rel) {
@@ -243,6 +249,13 @@ export const useStore = create<S>((set, get) => ({
       .catch(() => {});
   },
 
+  // Sidebar folder click: navigation + "selection" — arms Cmd+Backspace folder deletion
+  focusFolder: (rel) => {
+    get().closeViewer();
+    get().setFolder(rel);
+    set({ folderArmed: true });
+  },
+
   setSort: (sort) => {
     set({ sort });
     fetchAssets(get().folder, sort)
@@ -251,17 +264,17 @@ export const useStore = create<S>((set, get) => ({
   },
 
   setSel: (ids, anchor) =>
-    set((s) => ({ selIds: ids, anchorId: anchor !== undefined ? anchor : s.anchorId })),
+    set((s) => ({ selIds: ids, anchorId: anchor !== undefined ? anchor : s.anchorId, folderArmed: false })),
 
   selectAll: () => {
     const ids = get().assets.map((a) => a.id);
-    set({ selIds: ids, anchorId: ids[0] ?? null });
+    set({ selIds: ids, anchorId: ids[0] ?? null, folderArmed: false });
   },
 
   openViewer: (id) => {
     api
       .assetGet(id)
-      .then((a) => set({ viewerAsset: a }))
+      .then((a) => set({ viewerAsset: a, folderArmed: false }))
       .catch(() => {});
   },
 
@@ -276,9 +289,19 @@ export const useStore = create<S>((set, get) => ({
     if (!ids.length) return;
     const st = get();
     if (st.viewerAsset && ids.includes(st.viewerAsset.id)) st.closeViewer();
-    set((s) => ({ modal: null, selIds: s.selIds.filter((x) => !ids.includes(x)) }));
+    // Finder behavior: after trashing, select the item that followed the deleted ones,
+    // so repeated Cmd+Backspace walks through files (and never falls through to the folder)
+    const gone = new Set(ids);
+    const firstIdx = st.assets.findIndex((a) => gone.has(a.id));
+    set((s) => ({ modal: null, folderArmed: false, selIds: s.selIds.filter((x) => !gone.has(x)) }));
     try {
       const r = await api.assetsTrash(ids);
+      await get().refresh();
+      if (firstIdx >= 0 && !get().selIds.length && !get().viewerAsset) {
+        const after = get().assets;
+        const next = after[Math.min(firstIdx, after.length - 1)];
+        if (next) set({ selIds: [next.id], anchorId: next.id });
+      }
       const text = r.count === 1 ? tr("trashedOne") : tr("trashedN", { n: r.count });
       get().showToast(
         r.undoable ? { text, action: { label: tr("undoAction"), fn: () => get().undo() } } : text
@@ -355,10 +378,24 @@ export const useStore = create<S>((set, get) => ({
     }
   },
 
-  // Undoable via Cmd+Z at any time, so no confirmation dialog needed (Finder never confirms moving to Trash)
+  // Deletion entry point (sidebar context menu + Cmd+Backspace on the highlighted folder):
+  // empty folders trash immediately; non-empty ones confirm first, Enter = fast confirm
+  requestDeleteFolder: async (rel) => {
+    if (!rel || rel === INBOX || isTagView(rel)) return;
+    const label = rel.split("/").pop() || rel;
+    let hasContent = true; // if the probe fails, err on the side of asking
+    try {
+      hasContent = await api.folderHasContent(rel);
+    } catch {}
+    if (!hasContent) return get().doDeleteFolder(rel);
+    set({ modal: { kind: "confirmDeleteFolder", rel, label } });
+  },
+
+  // The actual delete — always undoable via Cmd+Z (the folder lands in the Trash whole)
   doDeleteFolder: async (rel) => {
     try {
       const undoable = await api.folderDelete(rel);
+      set({ folderArmed: false });
       if (get().folder.startsWith(rel)) get().setFolder("");
       get().showToast(
         undoable
