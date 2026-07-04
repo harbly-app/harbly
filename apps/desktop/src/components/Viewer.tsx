@@ -1,10 +1,15 @@
 import { ShieldCheck, ShieldOff } from "lucide-react";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { api, assetUrl } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import type { TFn } from "../lib/i18n";
 import { useStore } from "../lib/store";
+import { isMd } from "../lib/types";
 import type { AssetMeta } from "../lib/types";
+
+// Lazy: the Milkdown editor (and its Vue/CodeMirror runtime) only loads once a
+// Markdown file is actually opened, keeping HTML-only sessions lean.
+const MarkdownEditor = lazy(() => import("./MarkdownEditor"));
 
 /// Viewer embedded in the content area: file name and actions live in the window title bar (TitleBar),
 /// so this is just the preview itself — no second mini title bar
@@ -21,7 +26,21 @@ export default function Viewer() {
       const st = useStore.getState();
       const va = st.viewerAsset;
       if (st.paletteOpen || st.modal || !va) return;
-      if ((e.target as HTMLElement | null)?.tagName === "INPUT") return;
+      const el = e.target as HTMLElement | null;
+      // Inside a text field or the Markdown editor: let it own typing and
+      // navigation. First Esc leaves the editor; a second one closes the viewer.
+      if (
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.isContentEditable)
+      ) {
+        if (e.key === "Escape" && el.isContentEditable) {
+          e.preventDefault();
+          el.blur();
+        }
+        return;
+      }
       if (e.key === "Escape") {
         e.preventDefault();
         st.closeViewer();
@@ -40,6 +59,16 @@ export default function Viewer() {
   }, []);
 
   if (!a) return null;
+  // Markdown opens in the WYSIWYG editor; HTML in the sandboxed preview.
+  if (isMd(a.fileName)) {
+    return (
+      <Suspense
+        fallback={<div className="flex-1 bg-paper" aria-hidden="true" />}
+      >
+        <MarkdownEditor key={a.id} asset={a} />
+      </Suspense>
+    );
+  }
   // Keyed by file: switching files remounts and thereby restores the sandbox
   return <ViewerBody key={a.id} a={a} t={t} dragging={dragging} />;
 }

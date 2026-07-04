@@ -1,6 +1,7 @@
 mod db;
 mod error;
 mod extract;
+mod markdown;
 mod ops;
 mod scan;
 mod tags_xattr;
@@ -8,13 +9,14 @@ mod types;
 mod watch;
 
 pub use error::{HarblyError, Result};
+pub use markdown::md_to_html_body;
 pub use ops::copy_dir_recursive;
 pub use tags_xattr::{copy_tags, read_tags as read_file_tags, write_tags as write_file_tags};
 pub use types::*;
 pub use watch::watch_library;
 
 use jieba_rs::Jieba;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -63,9 +65,28 @@ impl Library {
     }
 
     pub fn version_file_path(&self, asset_id: &str, ver: i64) -> PathBuf {
+        let ext = self.asset_ext(asset_id);
         self.versions_dir()
             .join(asset_id)
-            .join(format!("v{ver}.html"))
+            .join(format!("v{ver}.{ext}"))
+    }
+
+    /// The on-disk extension used for an asset's version snapshots. It follows the
+    /// asset's current file (renames never change type), defaulting to "html".
+    pub(crate) fn asset_ext(&self, asset_id: &str) -> String {
+        let rel: Option<String> = self
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT rel_path FROM assets WHERE id=?1", [asset_id], |r| {
+                r.get(0)
+            })
+            .optional()
+            .ok()
+            .flatten();
+        rel.as_deref()
+            .and_then(ext_of)
+            .unwrap_or_else(|| "html".to_string())
     }
 
     /// Relative path → absolute path. Rejects path traversal.
@@ -89,14 +110,55 @@ pub(crate) fn now() -> i64 {
         .unwrap_or(0)
 }
 
-pub(crate) fn is_html(p: &Path) -> bool {
-    matches!(
-        p.extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_ascii_lowercase())
-            .as_deref(),
-        Some("html") | Some("htm")
-    )
+/// File modification time in whole seconds (0 if unavailable). Stored on the
+/// asset row so a later watcher-driven scan can skip re-hashing unchanged files.
+pub(crate) fn mtime_secs(md: &std::fs::Metadata) -> i64 {
+    md.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// The kinds of file the library manages, distinguished by extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AssetKind {
+    Html,
+    Markdown,
+}
+
+/// Classify a path by extension; `None` for anything the library doesn't manage.
+pub(crate) fn asset_kind(p: &Path) -> Option<AssetKind> {
+    match p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("html") | Some("htm") => Some(AssetKind::Html),
+        Some("md") | Some("markdown") => Some(AssetKind::Markdown),
+        _ => None,
+    }
+}
+
+/// Whether a path is a library-managed asset (HTML or Markdown). Gates the
+/// scanner and importer.
+pub(crate) fn is_asset(p: &Path) -> bool {
+    asset_kind(p).is_some()
+}
+
+/// The same predicate as [`is_asset`] but for a bare file name — exported for the
+/// shell layer's pasteboard filter, which reasons about names rather than paths.
+pub fn is_managed_name(name: &str) -> bool {
+    asset_kind(Path::new(name)).is_some()
+}
+
+/// The lowercased extension of a relative path, if any.
+pub(crate) fn ext_of(rel: &str) -> Option<String> {
+    Path::new(rel)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
 }
 
 pub(crate) fn parent_folder(rel: &str) -> String {

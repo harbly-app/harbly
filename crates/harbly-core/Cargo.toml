@@ -10,6 +10,8 @@ blake3 = "1"
 jieba-rs = "0.7"
 scraper = "0.20"
 ego-tree = "0.6"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+percent-encoding = "2"
 notify = "7"
 trash = "5"
 serde = { version = "1", features = ["derive"] }

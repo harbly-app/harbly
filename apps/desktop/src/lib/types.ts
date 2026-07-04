@@ -64,3 +64,10 @@ export interface ImportResult {
 export type SortKey = "recent" | "name" | "modified";
 
 export const INBOX = "_inbox";
+
+/** A Markdown asset — opened in the editor rather than the preview iframe. */
+export const isMd = (name: string) => /\.(md|markdown)$/i.test(name);
+
+/** Display name with the managed extension stripped (HTML or Markdown). */
+export const stemName = (name: string) =>
+  name.replace(/\.(html?|md|markdown)$/i, "");

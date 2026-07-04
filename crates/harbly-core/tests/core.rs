@@ -5,6 +5,14 @@ fn html(title: &str, body: &str) -> String {
     format!("<!doctype html><html><head><title>{title}</title></head><body><h2>{body}</h2><script>var x=1;</script></body></html>")
 }
 
+/// Build a Markdown document, optionally with a YAML front-matter title.
+fn md(front_title: Option<&str>, body: &str) -> String {
+    match front_title {
+        Some(t) => format!("---\ntitle: {t}\n---\n\n{body}"),
+        None => body.to_string(),
+    }
+}
+
 fn setup() -> (tempfile::TempDir, Library) {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("Harbly");
@@ -228,6 +236,179 @@ fn move_rename_inbox() {
     assert_eq!(sum.removed, 0);
     let a = lib.list_assets("项目A", SortKey::Name).unwrap();
     assert_eq!(a.len(), 2);
+}
+
+#[test]
+fn md_scan_title_precedence_and_chinese_fts() {
+    let (_tmp, lib) = setup();
+    let root = lib.root().to_path_buf();
+    // Front-matter title wins over the H1
+    fs::write(
+        root.join("frontmatter.md"),
+        md(Some("我的笔记"), "# 别的标题\n\n正文包含 定价 策略与净收入"),
+    )
+    .unwrap();
+    // No front matter → first H1 is the title
+    fs::write(
+        root.join("heading.md"),
+        md(None, "# 季度报告\n\n一些中文内容"),
+    )
+    .unwrap();
+    // Neither → falls back to the file stem
+    fs::write(
+        root.join("plain.md"),
+        md(None, "just plain text, no heading"),
+    )
+    .unwrap();
+
+    let sum = lib.scan(|_| {}).unwrap();
+    assert_eq!(sum.added, 3);
+
+    let all = lib.list_assets("", SortKey::Name).unwrap();
+    let title_of = |name: &str| {
+        all.iter()
+            .find(|a| a.file_name == name)
+            .unwrap()
+            .title
+            .clone()
+    };
+    assert_eq!(title_of("frontmatter.md"), "我的笔记");
+    assert_eq!(title_of("heading.md"), "季度报告");
+    assert_eq!(title_of("plain.md"), "plain"); // file stem
+
+    // Two-character Chinese word search hits the Markdown body (jieba path)
+    let hits = lib.search("定价").unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].asset.file_name, "frontmatter.md");
+}
+
+#[test]
+fn md_rename_preserves_extension() {
+    let (_tmp, lib) = setup();
+    fs::write(lib.root().join("note.md"), md(None, "# 甲\n\n内容")).unwrap();
+    fs::write(lib.root().join("page.html"), html("Page", "content")).unwrap();
+    lib.scan(|_| {}).unwrap();
+
+    let all = lib.list_assets("", SortKey::Name).unwrap();
+    let note = all.iter().find(|a| a.file_name == "note.md").unwrap();
+    let page = all.iter().find(|a| a.file_name == "page.html").unwrap();
+
+    // Markdown keeps .md even without a typed extension
+    let r = lib.rename_asset(&note.id, "改名").unwrap();
+    assert_eq!(r.file_name, "改名.md");
+    // Typing the wrong managed extension does not convert the type
+    let r = lib.rename_asset(&note.id, "again.html").unwrap();
+    assert_eq!(r.file_name, "again.md");
+    // HTML still behaves as before
+    let r = lib.rename_asset(&page.id, "renamed").unwrap();
+    assert_eq!(r.file_name, "renamed.html");
+
+    // An extension-only rename is rejected (would create a hidden ".md" file)
+    assert!(lib.rename_asset(&note.id, ".md").is_err());
+    assert!(lib.rename_asset(&note.id, ".html").is_err());
+    assert!(lib.root().join("again.md").exists()); // unchanged from the earlier rename
+}
+
+#[test]
+fn md_version_chain_uses_md_extension() {
+    let (_tmp, lib) = setup();
+    let f = lib.root().join("doc.md");
+    fs::write(&f, md(None, "# 标题\n\n第一版")).unwrap();
+    lib.scan(|_| {}).unwrap();
+    let id = lib.list_assets("", SortKey::Recent).unwrap()[0].id.clone();
+
+    fs::write(
+        &f,
+        md(None, "# 标题\n\n第二版内容，加长一些以确保 size 变化"),
+    )
+    .unwrap();
+    let sum = lib.scan(|_| {}).unwrap();
+    assert_eq!(sum.updated, 1);
+
+    // Version snapshots carry the asset's own extension
+    assert!(lib.version_file_path(&id, 1).exists());
+    assert!(lib.version_file_path(&id, 2).ends_with("v2.md"));
+    let v2 = fs::read_to_string(lib.version_file_path(&id, 2)).unwrap();
+    assert!(v2.contains("第二版内容"));
+
+    // Rollback restores content and appends a new version
+    lib.restore_version(&id, 1).unwrap();
+    assert!(fs::read_to_string(&f).unwrap().contains("第一版"));
+    assert_eq!(lib.list_versions(&id).unwrap().len(), 3);
+}
+
+#[test]
+fn write_text_autosaves_without_versioning() {
+    let (_tmp, lib) = setup();
+    let a = lib.create_markdown_asset("", "笔记").unwrap();
+    let base_hash = a.current_hash.clone();
+    assert_eq!(a.file_name, "笔记.md");
+    assert_eq!(a.ver_count, 1);
+
+    // Two autosaves: content + title update, but no new version rows
+    lib.write_asset_text(&a.id, "# 初稿\n\n一些内容").unwrap();
+    let a2 = lib
+        .write_asset_text(&a.id, "# 定稿\n\n更完整的内容")
+        .unwrap();
+    assert_eq!(a2.ver_count, 1);
+    assert_eq!(a2.title, "定稿");
+
+    // A scan sees the in-app write as already-indexed → no diff, no new version
+    let sum = lib.scan(|_| {}).unwrap();
+    assert!(!sum.changed());
+    assert_eq!(lib.asset(&a.id).unwrap().ver_count, 1);
+
+    // Ending the session checkpoints exactly one "编辑" version
+    let ver = lib.checkpoint_version(&a.id, &base_hash).unwrap();
+    assert_eq!(ver, Some(2));
+    let vs = lib.list_versions(&a.id).unwrap();
+    assert_eq!(vs.len(), 2);
+    assert_eq!(vs[0].label, "编辑");
+
+    // Checkpointing again with the same base is idempotent (dedup guard)
+    assert_eq!(lib.checkpoint_version(&a.id, &base_hash).unwrap(), Some(2));
+    assert_eq!(lib.list_versions(&a.id).unwrap().len(), 2);
+}
+
+#[test]
+fn import_mixed_html_and_markdown() {
+    let (tmp, lib) = setup();
+    let outside = tmp.path().join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("a.html"), html("A", "内容甲")).unwrap();
+    fs::write(outside.join("b.md"), md(None, "# B\n\n内容乙")).unwrap();
+    fs::write(outside.join("c.txt"), "plain text").unwrap();
+
+    let r = lib
+        .import_files(
+            &[
+                outside.join("a.html"),
+                outside.join("b.md"),
+                outside.join("c.txt"),
+            ],
+            "",
+        )
+        .unwrap();
+    assert_eq!(r.added, 2);
+    assert_eq!(r.skipped, 1);
+    assert!(harbly_core::is_managed_name("b.md"));
+    assert!(!harbly_core::is_managed_name("c.txt"));
+}
+
+#[test]
+fn md_render_rewrites_relative_images() {
+    // Relative images are rewritten to resolve through the asset protocol
+    let out = harbly_core::md_to_html_body(
+        "![alt](img/a.png)",
+        Some("harbly-asset://localhost/rel/ID/"),
+    );
+    assert!(out.contains("harbly-asset://localhost/rel/ID/img/a.png"));
+    // Absolute URLs are left untouched
+    let out = harbly_core::md_to_html_body("![alt](https://example.com/a.png)", Some("base/"));
+    assert!(out.contains("https://example.com/a.png"));
+    // A space in the path (angle-bracket destination) is percent-encoded
+    let out = harbly_core::md_to_html_body("![](<my pic.png>)", Some("b/"));
+    assert!(out.contains("b/my%20pic.png"));
 }
 
 /// Finder tag interop: set_tags writes the xattr; Finder-side edits (color-number format) are adopted by scans; duplicates inherit tags

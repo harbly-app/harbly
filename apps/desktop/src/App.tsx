@@ -1,10 +1,11 @@
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./lib/api";
 import { makeT } from "./lib/i18n";
 import { useStore } from "./lib/store";
-import { INBOX } from "./lib/types";
+import { INBOX, isMd } from "./lib/types";
 import Onboarding from "./components/Onboarding";
 import TitleBar from "./components/TitleBar";
 import Sidebar from "./components/Sidebar";
@@ -53,6 +54,10 @@ export default function App() {
           el.isContentEditable)
       );
     };
+    // Focus is inside the Markdown editor: ⌘Z/⌘⇧Z must drive ProseMirror's own
+    // history (execCommand has no effect on it), so route to the editor handle
+    const editorFocused = () =>
+      !!(document.activeElement as HTMLElement | null)?.closest(".milkdown");
     const hasTextSelection = () => {
       const sel = window.getSelection();
       return !!sel && !sel.isCollapsed;
@@ -65,6 +70,9 @@ export default function App() {
       switch (e.payload) {
         case "import":
           void st.pickImport();
+          break;
+        case "new-md":
+          void st.newMarkdown();
           break;
         case "new-folder":
           st.setModal({
@@ -89,14 +97,17 @@ export default function App() {
           api.rescan().catch(() => {});
           break;
         case "undo":
-          // Input focused = text undo; otherwise undo the last file operation (Finder-style Cmd+Z)
+          // Markdown editor → ProseMirror history; plain input → text undo;
+          // otherwise undo the last file operation (Finder-style Cmd+Z)
+          if (editorFocused() && st.editorHandle) st.editorHandle.undo();
           // eslint-disable-next-line @typescript-eslint/no-deprecated -- no modern API triggers text-field undo programmatically
-          if (editableFocused()) document.execCommand("undo");
+          else if (editableFocused()) document.execCommand("undo");
           else void st.undo();
           break;
         case "redo":
+          if (editorFocused() && st.editorHandle) st.editorHandle.redo();
           // eslint-disable-next-line @typescript-eslint/no-deprecated -- no modern API triggers text-field redo programmatically
-          if (editableFocused()) document.execCommand("redo");
+          else if (editableFocused()) document.execCommand("redo");
           else void st.redo();
           break;
         case "copy":
@@ -142,6 +153,10 @@ export default function App() {
         .onDragDropEvent((event) => {
           const st = useStore.getState();
           if (st.phase !== "main") return;
+          // Inside the Markdown editor, dragging a block handle is an internal
+          // reorder that Tauri's OS drag layer also reports; don't hijack it with
+          // the file-import overlay (an internal drag carries no file paths anyway).
+          if (st.viewerAsset && isMd(st.viewerAsset.fileName)) return;
           const p = event.payload;
           if (p.type === "enter" || p.type === "over") st.setDragOver(true);
           else if (p.type === "drop") {
@@ -152,6 +167,26 @@ export default function App() {
         .then(keep);
     } catch {
       // Outside Tauri (plain-browser dev) the webview handle throws synchronously; file drop is simply unavailable there
+    }
+
+    // Flush a pending Markdown autosave before the window closes (the 1s debounce
+    // could otherwise drop the last edit on quit)
+    try {
+      void getCurrentWindow()
+        .onCloseRequested(async (e) => {
+          const h = useStore.getState().editorHandle;
+          if (!h) return; // no editor mounted → close normally
+          e.preventDefault();
+          try {
+            await h.flush();
+          } catch {
+            // best effort — never block quitting on a save error
+          }
+          void getCurrentWindow().destroy();
+        })
+        .then(keep);
+    } catch {
+      // Plain-browser dev: no window handle
     }
 
     const onKey = (e: KeyboardEvent) => {

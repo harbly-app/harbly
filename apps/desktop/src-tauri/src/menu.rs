@@ -36,6 +36,11 @@ pub fn setup(app: &AppHandle, lang: &str) -> tauri::Result<()> {
 
     let file = SubmenuBuilder::new(app, t.menu_file)
         .item(
+            &MenuItemBuilder::with_id("new-md", t.new_md)
+                .accelerator("CmdOrCtrl+N")
+                .build(app)?,
+        )
+        .item(
             &MenuItemBuilder::with_id("import", t.import_html)
                 .accelerator("CmdOrCtrl+O")
                 .build(app)?,

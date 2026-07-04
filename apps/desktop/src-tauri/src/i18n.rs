@@ -20,6 +20,7 @@ pub struct L {
     pub settings: &'static str,
     // File
     pub menu_file: &'static str,
+    pub new_md: &'static str,
     pub import_html: &'static str,
     pub new_folder: &'static str,
     pub trash: &'static str,
@@ -59,6 +60,9 @@ pub struct L {
     pub op_import_one: &'static str,
     pub op_import_n: &'static str,
     pub op_paste_n: &'static str,
+    pub op_new_md: &'static str,
+    // Default name for a newly created Markdown file
+    pub untitled: &'static str,
     // About
     pub about_comment: &'static str,
 }
@@ -70,7 +74,8 @@ pub fn tpl(pattern: &str, value: &str) -> String {
 static ZH_CN: L = L {
     settings: "设置…",
     menu_file: "文件",
-    import_html: "导入 HTML…",
+    new_md: "新建 Markdown",
+    import_html: "导入文件…",
     new_folder: "新建文件夹",
     trash: "移入废纸篓",
     reveal_library: "在 Finder 中打开库",
@@ -104,13 +109,16 @@ static ZH_CN: L = L {
     op_import_one: "导入“{}”",
     op_import_n: "导入 {} 项",
     op_paste_n: "粘贴 {} 项",
+    op_new_md: "新建“{}”",
+    untitled: "未命名",
     about_comment: "本地优先的 HTML 资产管理器",
 };
 
 static ZH_TW: L = L {
     settings: "設定…",
     menu_file: "檔案",
-    import_html: "讀入 HTML…",
+    new_md: "新增 Markdown",
+    import_html: "讀入檔案…",
     new_folder: "新增檔案夾",
     trash: "丟到垃圾桶",
     reveal_library: "在 Finder 中打開資料庫",
@@ -144,13 +152,16 @@ static ZH_TW: L = L {
     op_import_one: "讀入「{}」",
     op_import_n: "讀入 {} 個項目",
     op_paste_n: "貼上 {} 個項目",
+    op_new_md: "新增「{}」",
+    untitled: "未命名",
     about_comment: "本地優先的 HTML 資產管理工具",
 };
 
 static EN: L = L {
     settings: "Settings…",
     menu_file: "File",
-    import_html: "Import HTML…",
+    new_md: "New Markdown",
+    import_html: "Import Files…",
     new_folder: "New Folder",
     trash: "Move to Trash",
     reveal_library: "Open Library in Finder",
@@ -184,13 +195,16 @@ static EN: L = L {
     op_import_one: "Import “{}”",
     op_import_n: "Import {} Items",
     op_paste_n: "Paste {} Items",
+    op_new_md: "New “{}”",
+    untitled: "Untitled",
     about_comment: "Local-first HTML asset manager",
 };
 
 static JA: L = L {
     settings: "設定…",
     menu_file: "ファイル",
-    import_html: "HTML を読み込む…",
+    new_md: "新規 Markdown",
+    import_html: "ファイルを読み込む…",
     new_folder: "新規フォルダ",
     trash: "ゴミ箱に入れる",
     reveal_library: "ライブラリを Finder で開く",
@@ -224,13 +238,16 @@ static JA: L = L {
     op_import_one: "「{}」の読み込み",
     op_import_n: "{} 項目の読み込み",
     op_paste_n: "{} 項目のペースト",
+    op_new_md: "「{}」の作成",
+    untitled: "無題",
     about_comment: "ローカルファーストの HTML アセット管理",
 };
 
 static KO: L = L {
     settings: "설정…",
     menu_file: "파일",
-    import_html: "HTML 가져오기…",
+    new_md: "새로운 Markdown",
+    import_html: "파일 가져오기…",
     new_folder: "새로운 폴더",
     trash: "휴지통으로 이동",
     reveal_library: "Finder에서 라이브러리 열기",
@@ -264,13 +281,16 @@ static KO: L = L {
     op_import_one: "‘{}’ 가져오기",
     op_import_n: "{}개 항목 가져오기",
     op_paste_n: "{}개 항목 붙여넣기",
+    op_new_md: "‘{}’ 생성",
+    untitled: "제목 없음",
     about_comment: "로컬 우선 HTML 에셋 관리자",
 };
 
 static ES: L = L {
     settings: "Ajustes…",
     menu_file: "Archivo",
-    import_html: "Importar HTML…",
+    new_md: "Nuevo Markdown",
+    import_html: "Importar archivos…",
     new_folder: "Nueva carpeta",
     trash: "Trasladar a la papelera",
     reveal_library: "Abrir biblioteca en el Finder",
@@ -304,6 +324,8 @@ static ES: L = L {
     op_import_one: "Importar «{}»",
     op_import_n: "Importar {} ítems",
     op_paste_n: "Pegar {} ítems",
+    op_new_md: "Nuevo «{}»",
+    untitled: "Sin título",
     about_comment: "Gestor local-first de recursos HTML",
 };
 

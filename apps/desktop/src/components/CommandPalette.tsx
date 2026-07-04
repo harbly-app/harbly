@@ -1,11 +1,18 @@
 import { Command } from "cmdk";
-import { FilePlus2, FolderPlus, RefreshCw, FileCode2 } from "lucide-react";
+import {
+  FilePlus2,
+  FileText,
+  FolderPlus,
+  RefreshCw,
+  FileCode2,
+  SquarePen,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import type { SearchHit } from "../lib/types";
-import { INBOX } from "../lib/types";
+import { INBOX, isMd } from "../lib/types";
 
 export default function CommandPalette() {
   const open = useStore((s) => s.paletteOpen);
@@ -78,7 +85,11 @@ function PaletteBody() {
                 onSelect={() => openAsset(h.asset.id)}
                 className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 data-[selected=true]:bg-primary/10"
               >
-                <FileCode2 className="h-4 w-4 shrink-0 text-sub" />
+                {isMd(h.asset.fileName) ? (
+                  <FileText className="h-4 w-4 shrink-0 text-sub" />
+                ) : (
+                  <FileCode2 className="h-4 w-4 shrink-0 text-sub" />
+                )}
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[12.5px] font-semibold">
                     {h.asset.title}
@@ -99,6 +110,21 @@ function PaletteBody() {
             <div className="px-2.5 pt-2 pb-1 text-[10.5px] font-bold text-sub">
               {t("commandsGroup")}
             </div>
+            <Command.Item
+              value="cmd-newmd"
+              onSelect={() => {
+                setPalette(false);
+                void st().newMarkdown();
+              }}
+              className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 data-[selected=true]:bg-primary/10"
+            >
+              <SquarePen className="h-4 w-4 shrink-0 text-primary" />
+              <span className="text-[12.5px]">{t("newMarkdownCmd")}</span>
+              <span className="flex-1" />
+              <kbd className="rounded border border-line bg-side px-1.5 py-0.5 text-[10px] text-sub">
+                ⌘N
+              </kbd>
+            </Command.Item>
             {q.trim() && (
               <Command.Item
                 value="cmd-newfolder"
@@ -124,7 +150,7 @@ function PaletteBody() {
               className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 data-[selected=true]:bg-primary/10"
             >
               <FilePlus2 className="h-4 w-4 shrink-0 text-primary" />
-              <span className="text-[12.5px]">{t("importHtmlCmd")}</span>
+              <span className="text-[12.5px]">{t("importFilesCmd")}</span>
               <span className="flex-1" />
               <span className="text-[10px] text-sub">
                 {t("orDragAnywhere")}

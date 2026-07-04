@@ -522,11 +522,25 @@ impl Library {
         if name.is_empty() {
             return Err(HarblyError::msg("名称不能为空"));
         }
-        let lower = name.to_ascii_lowercase();
-        if !lower.ends_with(".html") && !lower.ends_with(".htm") {
-            name.push_str(".html");
-        }
         let cur = self.asset(id)?;
+        // Renaming never changes an asset's type: drop any managed extension the
+        // user typed, then re-append the asset's own current extension.
+        if let Some(ext) = crate::ext_of(&cur.rel_path) {
+            let lower = name.to_ascii_lowercase();
+            for m in ["html", "htm", "md", "markdown"] {
+                if lower.ends_with(&format!(".{m}")) {
+                    name.truncate(name.len() - (m.len() + 1));
+                    break;
+                }
+            }
+            // Reject an extension-only rename (e.g. ".md"): the stem is now empty,
+            // and re-appending would produce a hidden, unscannable file like ".md".
+            if name.is_empty() {
+                return Err(HarblyError::msg("名称不能为空"));
+            }
+            name.push('.');
+            name.push_str(&ext);
+        }
         if name == cur.file_name {
             return Ok(cur);
         }
@@ -633,14 +647,104 @@ impl Library {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
-        self.update_asset_content(
-            id,
-            &content,
-            &hash,
-            content.len() as i64,
-            mtime,
-            &format!("回滚到 v{ver}"),
-        )?;
+        self.update_asset_content(id, &content, &hash, mtime, &format!("回滚到 v{ver}"))?;
         Ok(())
+    }
+
+    /// Read an asset's current file contents as text (for the in-app editor).
+    pub fn read_asset_text(&self, id: &str) -> Result<String> {
+        let abs = self.asset_abs_path(id)?;
+        Ok(std::fs::read_to_string(&abs)?)
+    }
+
+    /// Write new text to an asset's file and re-index it, WITHOUT creating a
+    /// version. The editor autosaves through this on every debounced keystroke;
+    /// a single version is captured per session via [`Library::checkpoint_version`].
+    /// The write is atomic (same-dir temp file + rename) and preserves Finder tags.
+    pub fn write_asset_text(&self, id: &str, text: &str) -> Result<AssetMeta> {
+        let cur = self.asset(id)?;
+        let abs = self.abs(&cur.rel_path);
+        let dir = abs
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| self.root().to_path_buf());
+        // The dot prefix keeps the file watcher quiet until the final rename, so a
+        // scan never observes the half-written temp file.
+        let tmp = dir.join(format!(
+            ".{}.tmp-{}",
+            cur.file_name,
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::write(&tmp, text.as_bytes())?;
+        // std::fs::rename does not carry xattrs from the destination; copy the
+        // asset's Finder tags onto the temp file so the atomic replace keeps them.
+        let _ = crate::tags_xattr::copy_tags(&abs, &tmp);
+        if let Err(e) = std::fs::rename(&tmp, &abs) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
+        let content = text.as_bytes();
+        let hash = blake3::hash(content).to_hex().to_string();
+        let md = std::fs::metadata(&abs)?;
+        self.reindex_content(
+            id,
+            &cur.rel_path,
+            content,
+            &hash,
+            crate::mtime_secs(&md),
+            None,
+        )?;
+        self.asset(id)
+    }
+
+    /// Append a version snapshot if the file changed since `base_hash` (captured
+    /// when the editing session opened). Called once when the session ends; the
+    /// dedup guard in `write_version` makes repeated calls idempotent. Returns the
+    /// new version number, or `None` if nothing changed.
+    pub fn checkpoint_version(&self, id: &str, base_hash: &str) -> Result<Option<i64>> {
+        let cur = self.asset(id)?;
+        if cur.current_hash == base_hash {
+            return Ok(None);
+        }
+        let content = std::fs::read(self.abs(&cur.rel_path))?;
+        let hash = blake3::hash(&content).to_hex().to_string();
+        let ver = self.write_version(id, &content, &hash, "编辑")?;
+        Ok(Some(ver))
+    }
+
+    /// Create a new empty Markdown asset in `folder` and register it. `name_stem`
+    /// is the (already localized) base name; a ".md" extension and a uniqueness
+    /// suffix are applied here.
+    pub fn create_markdown_asset(&self, folder: &str, name_stem: &str) -> Result<AssetMeta> {
+        let dir = if folder.is_empty() {
+            self.root().to_path_buf()
+        } else {
+            self.abs(folder)
+        };
+        std::fs::create_dir_all(&dir)?;
+        let mut stem = name_stem.trim().replace('/', "-");
+        if stem.is_empty() {
+            stem = "Untitled".to_string();
+        }
+        let name = unique_name(&dir, &format!("{stem}.md"));
+        let abs = dir.join(&name);
+        std::fs::write(&abs, b"")?;
+        let hash = blake3::hash(b"").to_hex().to_string();
+        let md = std::fs::metadata(&abs)?;
+        let rel = if folder.is_empty() {
+            name.clone()
+        } else {
+            format!("{folder}/{name}")
+        };
+        let id = self.insert_new_asset(
+            &rel,
+            b"",
+            &hash,
+            md.len() as i64,
+            crate::mtime_secs(&md),
+            "create",
+            "新建",
+        )?;
+        self.asset(&id)
     }
 }

@@ -7,6 +7,7 @@ import {
   ExternalLink,
   Eye,
   FileCode2,
+  FileText,
   FolderInput,
   FolderOpen,
   PencilLine,
@@ -19,7 +20,7 @@ import { makeT } from "../lib/i18n";
 import { dragJustEnded, useStore } from "../lib/store";
 import type { DragPayload } from "../lib/store";
 import type { AssetMeta, SortKey } from "../lib/types";
-import { INBOX } from "../lib/types";
+import { INBOX, isMd, stemName } from "../lib/types";
 import { dragStartHandler } from "../lib/drag";
 import { menuContentCls, MItem, MSep } from "./menu";
 import RenameInput from "./RenameInput";
@@ -27,8 +28,6 @@ import RenameInput from "./RenameInput";
 const CARD_MIN = 216;
 const GAP = 14;
 const PAD = 20;
-
-const stem = (fileName: string) => fileName.replace(/\.(html?|htm)$/i, "");
 
 /** Build the drag payload from the latest selection at mousedown: dragging an already-selected item drags the whole group (Finder semantics) */
 function payloadFor(a: AssetMeta): DragPayload {
@@ -297,12 +296,21 @@ function EmptyState({ inbox }: { inbox: boolean }) {
   );
 }
 
-function Thumb({ hash, epoch }: { hash: string; epoch: number }) {
+function Thumb({
+  hash,
+  epoch,
+  md,
+}: {
+  hash: string;
+  epoch: number;
+  md: boolean;
+}) {
   const [failed, setFailed] = useState(false);
   if (failed) {
+    const Icon = md ? FileText : FileCode2;
     return (
       <div className="grid h-full w-full place-items-center text-sub">
-        <FileCode2 className="h-7 w-7" />
+        <Icon className="h-7 w-7" />
       </div>
     );
   }
@@ -395,12 +403,13 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
               key={`${a.currentHash}:${epoch}`}
               hash={a.currentHash}
               epoch={epoch}
+              md={isMd(a.fileName)}
             />
           </div>
           <div className="px-3 py-2.5">
             {editing ? (
               <RenameInput
-                initial={stem(a.fileName)}
+                initial={stemName(a.fileName)}
                 className="-mx-0.5 h-6 w-full rounded border border-primary bg-card px-1.5 text-[13px] font-bold outline-none"
                 onCommit={(v) => st().doRename(a.id, v)}
                 onCancel={() => st().stopEdit()}
@@ -483,7 +492,11 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
               />
               <MItem
                 icon={<ExternalLink className="h-3.5 w-3.5" />}
-                label={t("openInBrowser")}
+                label={
+                  isMd(a.fileName)
+                    ? t("openWithDefaultApp")
+                    : t("openInBrowser")
+                }
                 onClick={() => api.openInBrowser(a.id).catch(() => {})}
               />
               <MItem

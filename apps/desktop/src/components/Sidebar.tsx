@@ -7,12 +7,14 @@ import {
   ExternalLink,
   Eye,
   FileCode2,
+  FileText,
   FolderInput,
   FolderOpen,
   FolderPlus,
   Hash,
   Inbox,
   PencilLine,
+  SquarePen,
   Tag as TagIcon,
   Trash2,
 } from "lucide-react";
@@ -21,7 +23,7 @@ import { api } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import { dragJustEnded, useStore } from "../lib/store";
 import type { TreeFile, TreeNode } from "../lib/types";
-import { INBOX } from "../lib/types";
+import { INBOX, isMd, stemName } from "../lib/types";
 import { dragStartHandler } from "../lib/drag";
 import { menuContentCls, MItem, MSep } from "./menu";
 import RenameInput from "./RenameInput";
@@ -273,6 +275,11 @@ function TreeRow(props: {
         <CM.Portal>
           <CM.Content className={menuContentCls}>
             <MItem
+              icon={<SquarePen className="h-3.5 w-3.5" />}
+              label={t("newMarkdownCmd")}
+              onClick={() => st().newMarkdown(node.rel)}
+            />
+            <MItem
               icon={<FolderPlus className="h-3.5 w-3.5" />}
               label={t("newSubfolder")}
               onClick={() =>
@@ -353,6 +360,7 @@ function FileRow(props: {
   const editing = useStore((s) => s.editingAsset === f.id);
   const t = makeT(useStore((s) => s.lang));
   const rel = folderRel ? `${folderRel}/${f.name}` : f.name;
+  const FileIcon = isMd(f.name) ? FileText : FileCode2;
 
   const openIt = () => {
     if (dragJustEnded()) return;
@@ -387,12 +395,12 @@ function FileRow(props: {
           }`}
           style={{ paddingLeft: 6 + depth * 13 + 20 }}
         >
-          <FileCode2
+          <FileIcon
             className={`h-3.5 w-3.5 shrink-0 ${active ? "text-primary" : "text-sub"}`}
           />
           {editing ? (
             <RenameInput
-              initial={f.name.replace(/\.(html?|htm)$/i, "")}
+              initial={stemName(f.name)}
               onCommit={(v) => st().doRename(f.id, v)}
               onCancel={() => st().stopEdit()}
             />
@@ -410,7 +418,7 @@ function FileRow(props: {
           />
           <MItem
             icon={<ExternalLink className="h-3.5 w-3.5" />}
-            label={t("openInBrowser")}
+            label={isMd(f.name) ? t("openWithDefaultApp") : t("openInBrowser")}
             onClick={() => api.openInBrowser(f.id).catch(() => {})}
           />
           <MItem

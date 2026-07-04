@@ -68,9 +68,144 @@ body {
 }
 
 input,
-textarea {
+textarea,
+[contenteditable="true"],
+[contenteditable="true"] * {
   user-select: text;
   -webkit-user-select: text;
+}
+
+/* Markdown editor (Milkdown Crepe): retune its theme variables to Harbly tokens.
+   The higher-specificity `.harbly-md .milkdown` selector wins over Crepe's own
+   `.milkdown` defaults regardless of stylesheet load order; because the tokens
+   themselves flip under .dark, the editor follows the app appearance for free. */
+.harbly-md .milkdown {
+  --crepe-color-background: transparent;
+  --crepe-color-on-background: var(--color-ink);
+  --crepe-color-surface: var(--color-card);
+  --crepe-color-surface-low: var(--color-side);
+  --crepe-color-on-surface: var(--color-ink);
+  --crepe-color-on-surface-variant: var(--color-sub2);
+  /* Crepe uses "outline" mainly as the muted ICON color (toolbar / slash menu /
+     block handle), not as a border — so map it to the app's secondary icon tone,
+     not the near-invisible strong-line color. */
+  --crepe-color-outline: var(--color-sub);
+  --crepe-color-primary: var(--color-primary);
+  --crepe-color-secondary: var(--color-side);
+  --crepe-color-on-secondary: var(--color-ink);
+  --crepe-color-inverse: var(--color-ink);
+  --crepe-color-on-inverse: var(--color-paper);
+  --crepe-color-inline-code: var(--color-danger);
+  --crepe-color-error: var(--color-danger);
+  --crepe-color-hover: var(--color-side);
+  --crepe-color-selected: color-mix(
+    in srgb,
+    var(--color-primary) 18%,
+    transparent
+  );
+  --crepe-color-inline-area: var(--color-line);
+  --crepe-font-title: var(--font-sans);
+  --crepe-font-default: var(--font-sans);
+  --crepe-font-code:
+    "SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+}
+
+/* The frame theme ships a fixed 60px/120px editor padding meant for a full-width
+   pane; inside our centered max-52rem column that swallows most of the width.
+   Trim it to a balanced document inset (equal top/bottom, slightly wider sides). */
+.harbly-md .milkdown .ProseMirror {
+  padding: 2.5rem 3.5rem;
+}
+
+/* Crepe's chrome (slash menu, selection toolbar, drag handle) ships at a 14px /
+   24px-icon scale that towers over Harbly's 12–13px UI. Shrink it to match. */
+.harbly-md .milkdown .milkdown-slash-menu {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-ctl);
+  box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.25);
+  overflow: hidden;
+}
+.harbly-md .milkdown .milkdown-slash-menu .tab-group {
+  padding: 7px 7px 0;
+}
+.harbly-md .milkdown .milkdown-slash-menu .tab-group ul {
+  padding: 4px 5px 6px;
+  gap: 4px;
+}
+.harbly-md .milkdown .milkdown-slash-menu .tab-group ul li {
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  border-radius: 7px;
+}
+.harbly-md .milkdown .milkdown-slash-menu .menu-groups {
+  padding: 0 7px 7px;
+  max-height: 320px;
+}
+.harbly-md .milkdown .milkdown-slash-menu .menu-groups .menu-group h6 {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 9px 9px 3px;
+}
+.harbly-md .milkdown .milkdown-slash-menu .menu-groups .menu-group li {
+  gap: 10px;
+  padding: 7px 9px;
+  min-width: 196px;
+  border-radius: 8px;
+}
+.harbly-md .milkdown .milkdown-slash-menu .menu-groups .menu-group li svg {
+  width: 16px;
+  height: 16px;
+}
+.harbly-md .milkdown .milkdown-slash-menu .menu-groups .menu-group li > span {
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+/* Selection toolbar */
+.harbly-md .milkdown .milkdown-toolbar {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-ctl);
+  box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.25);
+}
+.harbly-md .milkdown .milkdown-toolbar .toolbar-item {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  /* Grid-center the icon: without it the inline <svg> sits on the text baseline
+     and leaves descender space below, which reads as an off-center button once
+     the icon is smaller than the box. */
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.harbly-md .milkdown .milkdown-toolbar .toolbar-item svg {
+  width: 16px;
+  height: 16px;
+}
+.harbly-md .milkdown .milkdown-toolbar .divider {
+  height: 20px;
+}
+
+/* The block handle holds two items: the "+" add button (works — opens the insert
+   menu) and the "⠿" drag grip. Drag-reorder is swallowed by Tauri's
+   dragDropEnabled, so hide only the drag grip (the last item) and keep "+". */
+.harbly-md .milkdown .milkdown-block-handle .operation-item {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.harbly-md .milkdown .milkdown-block-handle .operation-item svg {
+  width: 17px;
+  height: 17px;
+}
+.harbly-md .milkdown .milkdown-block-handle .operation-item:last-child {
+  display: none;
 }
 
 ::-webkit-scrollbar {

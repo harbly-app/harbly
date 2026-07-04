@@ -1,13 +1,23 @@
 use crate::error::Result;
+use crate::extract::Extracted;
 use crate::types::*;
 use crate::{
-    extract, file_stem, is_hidden_component, is_html, now, parent_folder, unique_name, Library,
+    asset_kind, extract, file_stem, is_asset, is_hidden_component, markdown, now, parent_folder,
+    unique_name, AssetKind, Library,
 };
 use rusqlite::{params, OptionalExtension};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 use walkdir::WalkDir;
+
+/// Extract title + indexable body from raw content, dispatched by file kind.
+fn extract_for(rel: &str, text: &str) -> Extracted {
+    match asset_kind(Path::new(rel)) {
+        Some(AssetKind::Markdown) => markdown::extract_md(text),
+        _ => extract::extract_html(text),
+    }
+}
 
 impl Library {
     /// Full scan. Incremental strategy: rel_path already registered and (size, mtime) unchanged → skip re-hashing.
@@ -21,7 +31,7 @@ impl Library {
             .into_iter()
             .filter_entry(|e| e.depth() == 0 || !is_hidden_component(e.file_name()))
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file() && is_html(e.path()))
+            .filter(|e| e.file_type().is_file() && is_asset(e.path()))
             .filter_map(|e| {
                 let rel = e
                     .path()
@@ -163,7 +173,7 @@ impl Library {
                         params![size, mtime, id],
                     )?;
                 } else {
-                    self.update_asset_content(&id, &content, &hash, size, mtime, "外部修改")?;
+                    self.update_asset_content(&id, &content, &hash, mtime, "外部修改")?;
                     sum.updated += 1;
                 }
             }
@@ -212,7 +222,7 @@ impl Library {
     ) -> Result<String> {
         let id = Uuid::new_v4().to_string();
         let text = String::from_utf8_lossy(content);
-        let ex = extract::extract(&text);
+        let ex = extract_for(rel, &text);
         let title = ex.title.unwrap_or_else(|| file_stem(rel));
         let t = now();
         {
@@ -245,12 +255,33 @@ impl Library {
         id: &str,
         content: &[u8],
         hash: &str,
-        size: i64,
         mtime: i64,
         ver_label: &str,
     ) -> Result<()> {
+        let rel: String = {
+            let db = self.db.lock().unwrap();
+            db.query_row("SELECT rel_path FROM assets WHERE id=?1", [id], |r| {
+                r.get(0)
+            })?
+        };
+        self.reindex_content(id, &rel, content, hash, mtime, Some(ver_label))
+    }
+
+    /// Update an asset's row + FTS index from freshly written bytes, optionally
+    /// appending a version snapshot. Autosave passes `version_label = None`
+    /// (per-keystroke saves never version); external edits and rollbacks pass a
+    /// label so the change enters the version chain.
+    pub(crate) fn reindex_content(
+        &self,
+        id: &str,
+        rel: &str,
+        content: &[u8],
+        hash: &str,
+        mtime: i64,
+        version_label: Option<&str>,
+    ) -> Result<()> {
         let text = String::from_utf8_lossy(content);
-        let ex = extract::extract(&text);
+        let ex = extract_for(rel, &text);
         {
             let db = self.db.lock().unwrap();
             let title: String = match ex.title {
@@ -259,7 +290,7 @@ impl Library {
             };
             db.execute(
                 "UPDATE assets SET title=?1, current_hash=?2, size_bytes=?3, mtime=?4, updated_at=?5 WHERE id=?6",
-                params![title, hash, size, mtime, now(), id],
+                params![title, hash, content.len() as i64, mtime, now(), id],
             )?;
             db.execute("DELETE FROM fts WHERE asset_id=?1", [id])?;
             db.execute(
@@ -267,11 +298,16 @@ impl Library {
                 params![id, self.seg(&title), self.seg(&ex.body)],
             )?;
         }
-        self.write_version(id, content, hash, ver_label)?;
+        if let Some(label) = version_label {
+            self.write_version(id, content, hash, label)?;
+        }
         Ok(())
     }
 
-    /// A version = a full file, stored at .harbly/versions/<asset_id>/vN.html
+    /// A version = a full file, stored at .harbly/versions/<asset_id>/vN.<ext>.
+    /// Deduplicated: if the newest version already carries this hash, no new
+    /// snapshot is written (keeps checkpoints idempotent and absorbs the
+    /// autosave/scan race that could otherwise append a spurious version).
     pub(crate) fn write_version(
         &self,
         asset_id: &str,
@@ -279,17 +315,25 @@ impl Library {
         hash: &str,
         label: &str,
     ) -> Result<i64> {
-        let next: i64 = {
+        let next = {
             let db = self.db.lock().unwrap();
-            db.query_row(
-                "SELECT COALESCE(MAX(ver),0)+1 FROM versions WHERE asset_id=?1",
-                [asset_id],
-                |r| r.get(0),
-            )?
+            let last: Option<(i64, String)> = db
+                .query_row(
+                    "SELECT ver, hash FROM versions WHERE asset_id=?1 ORDER BY ver DESC LIMIT 1",
+                    [asset_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            match last {
+                Some((ver, h)) if h == hash => return Ok(ver),
+                Some((ver, _)) => ver + 1,
+                None => 1,
+            }
         };
+        let ext = self.asset_ext(asset_id);
         let dir = self.versions_dir().join(asset_id);
         std::fs::create_dir_all(&dir)?;
-        std::fs::write(dir.join(format!("v{next}.html")), content)?;
+        std::fs::write(dir.join(format!("v{next}.{ext}")), content)?;
         let db = self.db.lock().unwrap();
         db.execute(
             "INSERT INTO versions(asset_id, ver, hash, label, size_bytes, created_at) VALUES(?1,?2,?3,?4,?5,?6)",
@@ -323,7 +367,7 @@ impl Library {
         std::fs::create_dir_all(&dest_dir)?;
 
         for p in paths {
-            if !is_html(p) {
+            if !is_asset(p) {
                 res.skipped += 1;
                 continue;
             }

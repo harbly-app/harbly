@@ -1,5 +1,6 @@
 mod commands;
 mod i18n;
+mod md_template;
 mod menu;
 mod pasteboard;
 mod protocol;
@@ -30,6 +31,10 @@ pub fn run() {
             commands::list_assets,
             commands::asset_get,
             commands::inbox_count,
+            commands::asset_read_text,
+            commands::asset_write,
+            commands::asset_checkpoint,
+            commands::asset_new_markdown,
             commands::import_paths,
             commands::pick_and_import,
             commands::search_assets,

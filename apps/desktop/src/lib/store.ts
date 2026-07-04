@@ -33,6 +33,15 @@ export interface Toast {
   action?: { label: string; fn: () => void };
 }
 
+/** Bridge to the mounted Markdown editor so the native menu (⌘Z/⌘⇧Z) can drive
+ * ProseMirror's own history, and quit/close can flush a pending autosave. */
+export interface EditorHandle {
+  undo(): void;
+  redo(): void;
+  /** Persist any pending debounced edit immediately. */
+  flush(): Promise<void>;
+}
+
 // Suppress clicks for a short window after a drag ends (prevents accidental select/open/folder-switch right after dropping)
 let dragEndAt = 0;
 export const dragJustEnded = () => Date.now() - dragEndAt < 250;
@@ -57,6 +66,8 @@ interface S {
   editingAsset: string | null;
   editingFolder: string | null;
   viewerAsset: AssetMeta | null;
+  /** Registered while a Markdown editor is mounted; null otherwise */
+  editorHandle: EditorHandle | null;
   paletteOpen: boolean;
   modal: Modal | null;
   toast: Toast | null;
@@ -65,6 +76,8 @@ interface S {
   dragAsset: DragPayload | null;
   dropTarget: string | null;
   sidebarOpen: boolean;
+  /** Markdown editor width: false = comfortable reading column, true = fill the pane */
+  mdWide: boolean;
   /** UI language (six locales), kept in sync with the native menu */
   lang: Lang;
   /** Appearance preference; "system" follows the OS live */
@@ -75,6 +88,7 @@ interface S {
   setLang: (l: Lang) => void;
   setTheme: (t: ThemePref) => void;
   toggleSidebar: () => void;
+  toggleMdWide: () => void;
   boot: () => Promise<void>;
   enterMain: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -84,6 +98,8 @@ interface S {
   selectAll: () => void;
   openViewer: (id: string) => void;
   closeViewer: () => void;
+  setEditorHandle: (h: EditorHandle | null) => void;
+  newMarkdown: (folder?: string) => Promise<void>;
   startEditAsset: (id: string) => void;
   startEditFolder: (rel: string) => void;
   stopEdit: () => void;
@@ -148,7 +164,7 @@ function importToast(get: () => S, r: ImportResult): Toast {
   if (r.added) parts.push(tr("importedN", { n: r.added }));
   if (r.duplicates) parts.push(tr("dupSkippedN", { n: r.duplicates }));
   if (r.renamed) parts.push(tr("renamedSuffixN", { n: r.renamed }));
-  if (r.skipped) parts.push(tr("skippedNonHtmlN", { n: r.skipped }));
+  if (r.skipped) parts.push(tr("skippedUnsupportedN", { n: r.skipped }));
   const toast: Toast = { text: parts.join(" · ") || tr("nothingImported") };
   if (r.duplicates > 0 && r.dupOf.length > 0) {
     toast.action = {
@@ -184,6 +200,7 @@ export const useStore = create<S>((set, get) => ({
   editingAsset: null,
   editingFolder: null,
   viewerAsset: null,
+  editorHandle: null,
   paletteOpen: false,
   modal: null,
   toast: null,
@@ -192,6 +209,7 @@ export const useStore = create<S>((set, get) => ({
   dragAsset: null,
   dropTarget: null,
   sidebarOpen: localStorage.getItem("harbly.sidebar") !== "0",
+  mdWide: localStorage.getItem("harbly.mdWide") === "1",
   lang: bootLang,
   theme: bootTheme,
 
@@ -213,6 +231,13 @@ export const useStore = create<S>((set, get) => ({
       const v = !s.sidebarOpen;
       localStorage.setItem("harbly.sidebar", v ? "1" : "0");
       return { sidebarOpen: v };
+    }),
+
+  toggleMdWide: () =>
+    set((s) => {
+      const v = !s.mdWide;
+      localStorage.setItem("harbly.mdWide", v ? "1" : "0");
+      return { mdWide: v };
     }),
 
   boot: async () => {
@@ -330,6 +355,25 @@ export const useStore = create<S>((set, get) => ({
   },
 
   closeViewer: () => set({ viewerAsset: null }),
+
+  setEditorHandle: (h) => set({ editorHandle: h }),
+
+  // New Markdown lands in `folder` when given (folder context menu), else the
+  // current folder — tag/inbox views fall back to the library root, mirroring the
+  // New Folder rule. It then opens straight in the editor.
+  newMarkdown: async (folder) => {
+    const st = get();
+    const dest =
+      folder ??
+      (st.folder.startsWith("#") || st.folder === INBOX ? "" : st.folder);
+    try {
+      const a = await api.newMarkdown(dest);
+      get().setFolder(a.folder);
+      get().openViewer(a.id);
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
 
   startEditAsset: (id) => set({ editingAsset: id, editingFolder: null }),
   startEditFolder: (rel) => set({ editingFolder: rel, editingAsset: null }),

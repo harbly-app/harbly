@@ -23,6 +23,14 @@ export const api = {
     invoke<AssetMeta[]>("list_assets", { folder, sort }),
   assetGet: (id: string) => invoke<AssetMeta>("asset_get", { id }),
   inboxCount: () => invoke<number>("inbox_count"),
+  // Markdown editing
+  assetReadText: (id: string) => invoke<string>("asset_read_text", { id }),
+  assetWrite: (id: string, content: string) =>
+    invoke<AssetMeta>("asset_write", { id, content }),
+  assetCheckpoint: (id: string, baseHash: string) =>
+    invoke<boolean>("asset_checkpoint", { id, baseHash }),
+  newMarkdown: (folder: string, name?: string) =>
+    invoke<AssetMeta>("asset_new_markdown", { folder, name: name ?? null }),
   importPaths: (paths: string[], dest: string) =>
     invoke<ImportResult>("import_paths", { paths, dest }),
   pickAndImport: (dest: string) =>
@@ -76,6 +84,15 @@ export const api = {
 
 export const assetUrl = (id: string) =>
   `harbly-asset://localhost/current/${encodeURIComponent(id)}`;
+
+/** URL for a file referenced (relatively) by a Markdown asset — resolved by the
+ * protocol handler against the asset's own folder. Each path segment is encoded
+ * to match the handler's per-segment percent-decoding. */
+export const relAssetUrl = (id: string, rel: string) =>
+  `harbly-asset://localhost/rel/${encodeURIComponent(id)}/${rel
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
 
 export const thumbUrl = (hash: string) =>
   `harbly-thumb://localhost/${hash}.jpg`;

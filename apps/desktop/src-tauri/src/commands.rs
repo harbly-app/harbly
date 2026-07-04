@@ -262,6 +262,87 @@ pub async fn inbox_count(app: AppHandle) -> Result<i64, String> {
         .map_err(|e| e.to_string())
 }
 
+// ---------- Markdown editing ----------
+
+/// Read an asset's current file contents (for the in-app Markdown editor)
+#[tauri::command]
+pub async fn asset_read_text(app: AppHandle, id: String) -> Result<String, String> {
+    let lib = app.state::<AppState>().lib()?;
+    tauri::async_runtime::spawn_blocking(move || lib.read_asset_text(&id))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// Autosave: write new text and re-index, WITHOUT versioning or notifying the UI.
+/// Per-session versioning happens once, at `asset_checkpoint`. Emitting
+/// library-changed here would refresh the grid mid-edit and snapshot a thumbnail
+/// on every keystroke-pause, so it is deliberately omitted.
+#[tauri::command]
+pub async fn asset_write(
+    app: AppHandle,
+    id: String,
+    content: String,
+) -> Result<harbly_core::AssetMeta, String> {
+    let lib = app.state::<AppState>().lib()?;
+    tauri::async_runtime::spawn_blocking(move || lib.write_asset_text(&id, &content))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// End of an editing session: append one "编辑" version if the content changed
+/// since `base_hash`. Only then does the grid refresh and the thumbnail rebuild.
+#[tauri::command]
+pub async fn asset_checkpoint(
+    app: AppHandle,
+    id: String,
+    base_hash: String,
+) -> Result<bool, String> {
+    let lib = app.state::<AppState>().lib()?;
+    let created =
+        tauri::async_runtime::spawn_blocking(move || lib.checkpoint_version(&id, &base_hash))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+    if created.is_some() {
+        enqueue_missing_thumbs(&app);
+        let _ = app.emit("library-changed", ());
+    }
+    Ok(created.is_some())
+}
+
+/// Create a new empty Markdown file and open it (undoable, like New Folder)
+#[tauri::command]
+pub async fn asset_new_markdown(
+    app: AppHandle,
+    folder: String,
+    name: Option<String>,
+) -> Result<harbly_core::AssetMeta, String> {
+    let lib = app.state::<AppState>().lib()?;
+    let t = crate::i18n::l(&cur_lang(&app));
+    let stem = name
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| t.untitled.to_string());
+    let lib2 = lib.clone();
+    let a =
+        tauri::async_runtime::spawn_blocking(move || lib2.create_markdown_asset(&folder, &stem))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+    record_op(
+        &app,
+        FileOp::Created {
+            paths: vec![lib.abs(&a.rel_path)],
+        },
+        crate::i18n::tpl(t.op_new_md, &a.file_name),
+    );
+    enqueue_missing_thumbs(&app);
+    let _ = app.emit("library-changed", ());
+    Ok(a)
+}
+
 #[tauri::command]
 pub async fn import_paths(
     app: AppHandle,
@@ -310,7 +391,7 @@ pub async fn pick_and_import(
     let files: Vec<String> = tauri::async_runtime::spawn_blocking(move || {
         app2.dialog()
             .file()
-            .add_filter("HTML", &["html", "htm"])
+            .add_filter("HTML / Markdown", &["html", "htm", "md", "markdown"])
             .blocking_pick_files()
             .unwrap_or_default()
             .into_iter()
@@ -1066,13 +1147,13 @@ pub async fn pasteboard_paste(
         let mut created: Vec<PathBuf> = vec![];
         for src in &srcs {
             let is_dir = src.is_dir();
-            let is_html = src
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| matches!(e.to_ascii_lowercase().as_str(), "html" | "htm"))
+            let is_managed = src
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(harbly_core::is_managed_name)
                 .unwrap_or(false);
-            if !is_dir && !is_html {
-                continue; // The library only manages HTML
+            if !is_dir && !is_managed {
+                continue; // The library only manages HTML / Markdown files
             }
             if is_dir && dest_dir.starts_with(src) {
                 continue; // A folder cannot be pasted into itself

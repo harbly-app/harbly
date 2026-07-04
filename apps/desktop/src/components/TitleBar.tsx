@@ -2,17 +2,19 @@ import {
   ChevronLeft,
   ExternalLink,
   FolderOpen,
+  MoveHorizontal,
   PanelLeft,
   Plus,
   RefreshCw,
   Search,
   Settings,
+  SquarePen,
 } from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import { useStore } from "../lib/store";
-import { INBOX } from "../lib/types";
+import { INBOX, isMd } from "../lib/types";
 import { windowDrag } from "../lib/drag";
 
 export default function TitleBar() {
@@ -24,6 +26,8 @@ export default function TitleBar() {
   // When viewing a file, the title bar switches to document context: the file name goes into the window title bar (macOS document-window convention),
   // and the viewer itself no longer has a second mini title bar
   const viewer = useStore((s) => s.viewerAsset);
+  const mdWide = useStore((s) => s.mdWide);
+  const toggleMdWide = useStore((s) => s.toggleMdWide);
   const t = makeT(useStore((s) => s.lang));
   const [scanning, setScanning] = useState(false);
 
@@ -105,9 +109,27 @@ export default function TitleBar() {
 
           <div className="flex-1" />
 
+          {isMd(viewer.fileName) && (
+            <button
+              onClick={toggleMdWide}
+              title={t("mdEditorWidth")}
+              className={`relative z-[1] grid h-8 w-8 place-items-center rounded-ctl transition ${
+                mdWide
+                  ? "bg-primary/10 text-primary"
+                  : "text-sub hover:bg-side hover:text-ink"
+              }`}
+            >
+              <MoveHorizontal className="h-4 w-4" />
+            </button>
+          )}
+
           <button
             onClick={() => api.openInBrowser(viewer.id).catch(() => {})}
-            title={t("openInBrowser")}
+            title={
+              isMd(viewer.fileName)
+                ? t("openWithDefaultApp")
+                : t("openInBrowser")
+            }
             className="relative z-[1] grid h-8 w-8 place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
           >
             <ExternalLink className="h-4 w-4" />
@@ -151,6 +173,14 @@ export default function TitleBar() {
             <RefreshCw
               className={`h-4 w-4 ${scanning ? "animate-spin text-primary" : ""}`}
             />
+          </button>
+
+          <button
+            onClick={() => useStore.getState().newMarkdown()}
+            title={`${t("newMarkdownCmd")} (⌘N)`}
+            className="relative z-[1] grid h-8 w-8 place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
+          >
+            <SquarePen className="h-4 w-4" />
           </button>
 
           <button
