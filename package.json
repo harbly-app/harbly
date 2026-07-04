@@ -1,0 +1,12 @@
+{
+  "name": "harbly",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev:desktop": "pnpm --filter @harbly/desktop tauri dev",
+    "build:desktop": "pnpm --filter @harbly/desktop tauri build",
+    "dev:landing": "pnpm --filter @harbly/landing dev",
+    "build:landing": "pnpm --filter @harbly/landing build",
+    "test:core": "cargo test -p harbly-core"
+  }
+}

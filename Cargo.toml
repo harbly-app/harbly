@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["crates/harbly-core", "apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0"
+
+[profile.dev]
+incremental = true
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true

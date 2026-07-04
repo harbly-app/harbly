@@ -1,0 +1,54 @@
+[package]
+name = "harbly-app"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "harbly_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-drag = "2"
+harbly-core = { path = "../../../crates/harbly-core" }
+notify = "7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+percent-encoding = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", features = [
+    "NSData",
+    "NSString",
+    "NSValue",
+    "NSDictionary",
+    "NSError",
+    "NSObject",
+    "NSFileManager",
+    "NSURL",
+] }
+objc2-app-kit = { version = "0.3", features = [
+    "NSImage",
+    "NSImageRep",
+    "NSBitmapImageRep",
+    "NSGraphics",
+    "NSResponder",
+    "NSView",
+    "NSPasteboard",
+    "NSApplication",
+] }
+objc2-web-kit = { version = "0.3", features = [
+    "WKWebView",
+    "WKSnapshotConfiguration",
+    "block2",
+    "objc2-app-kit",
+] }

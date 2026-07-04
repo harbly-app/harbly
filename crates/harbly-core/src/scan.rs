@@ -1,0 +1,359 @@
+use crate::error::Result;
+use crate::types::*;
+use crate::{extract, file_stem, is_hidden_component, is_html, now, parent_folder, unique_name, Library};
+use rusqlite::{params, OptionalExtension};
+use std::collections::HashSet;
+use std::path::PathBuf;
+use uuid::Uuid;
+use walkdir::WalkDir;
+
+impl Library {
+    /// Full scan. Incremental strategy: rel_path already registered and (size, mtime) unchanged → skip re-hashing.
+    /// Detects three kinds of external change: new files, content modified externally (appends a new version), and Finder moves (path rebound by hash).
+    pub fn scan(&self, mut progress: impl FnMut(ScanProgress)) -> Result<ScanSummary> {
+        let mut sum = ScanSummary::default();
+        let mut seen: HashSet<String> = HashSet::new();
+
+        let files: Vec<(String, i64, i64)> = WalkDir::new(&self.root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| e.depth() == 0 || !is_hidden_component(e.file_name()))
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file() && is_html(e.path()))
+            .filter_map(|e| {
+                let rel = e
+                    .path()
+                    .strip_prefix(&self.root)
+                    .ok()?
+                    .to_str()?
+                    .replace('\\', "/");
+                let md = e.metadata().ok()?;
+                let mtime = md
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                Some((rel, md.len() as i64, mtime))
+            })
+            .collect();
+
+        sum.total = files.len();
+        let found = files.len();
+        let mut indexed = 0usize;
+
+        for (rel, size, mtime) in files {
+            seen.insert(rel.clone());
+            // A single file failing (e.g. deleted mid-read) must not abort the whole scan
+            if let Err(_e) = self.index_path(&rel, size, mtime, &mut sum) {
+                continue;
+            }
+            indexed += 1;
+            if indexed % 25 == 0 {
+                progress(ScanProgress { found, indexed });
+            }
+        }
+        progress(ScanProgress { found, indexed });
+
+        // Clean up records whose files no longer exist on disk (deleted externally / moved out of the library)
+        let stale: Vec<String> = {
+            let db = self.db.lock().unwrap();
+            let mut stmt = db.prepare("SELECT id, rel_path FROM assets")?;
+            let rows: Vec<(String, String)> = stmt
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                .filter_map(|r| r.ok())
+                .collect();
+            rows.into_iter()
+                .filter(|(_, rel)| !seen.contains(rel))
+                .map(|(id, _)| id)
+                .collect()
+        };
+        for id in stale {
+            self.remove_asset_rows(&id, true)?;
+            sum.removed += 1;
+        }
+
+        // The source of truth for tags is the file xattr (interop with Finder): adopt disk-side changes into the index
+        #[cfg(target_os = "macos")]
+        {
+            self.migrate_db_tags_to_xattr()?;
+            sum.tags_synced = self.sync_tags_from_disk()?;
+        }
+        Ok(sum)
+    }
+
+    /// One-time migration: early versions stored tags only in the database — write them out to file xattrs;
+    /// from then on the xattr is the source of truth for tags (Finder-side edits get adopted during scans).
+    #[cfg(target_os = "macos")]
+    fn migrate_db_tags_to_xattr(&self) -> Result<()> {
+        let done: Option<String> = {
+            let db = self.db.lock().unwrap();
+            db.query_row("SELECT value FROM meta WHERE key='tags_in_xattr'", [], |r| r.get(0))
+                .optional()?
+        };
+        if done.is_some() {
+            return Ok(());
+        }
+        for a in self.all_assets()? {
+            if !a.tags.is_empty() {
+                let abs = self.abs(&a.rel_path);
+                if abs.exists() && crate::tags_xattr::read_tags(&abs).is_empty() {
+                    let _ = crate::tags_xattr::write_tags(&abs, &a.tags);
+                }
+            }
+        }
+        let db = self.db.lock().unwrap();
+        db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('tags_in_xattr','1')", [])?;
+        Ok(())
+    }
+
+    /// Make database tags follow the on-disk xattrs (Finder adding/removing tags, restoring files that carry tags, etc.)
+    #[cfg(target_os = "macos")]
+    fn sync_tags_from_disk(&self) -> Result<usize> {
+        let mut n = 0usize;
+        for a in self.all_assets()? {
+            let disk = crate::tags_xattr::read_tags(&self.abs(&a.rel_path));
+            let mut want = disk.clone();
+            want.sort();
+            let mut have = a.tags.clone();
+            have.sort();
+            have.dedup();
+            if want != have {
+                self.set_tags_db(&a.id, &disk)?;
+                n += 1;
+            }
+        }
+        Ok(n)
+    }
+
+    fn index_path(&self, rel: &str, size: i64, mtime: i64, sum: &mut ScanSummary) -> Result<()> {
+        let existing: Option<(String, i64, i64, String)> = {
+            let db = self.db.lock().unwrap();
+            db.query_row(
+                "SELECT id, size_bytes, mtime, current_hash FROM assets WHERE rel_path=?1",
+                [rel],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .optional()?
+        };
+        if let Some((_, s, m, _)) = &existing {
+            if *s == size && *m == mtime {
+                return Ok(());
+            }
+        }
+
+        let content = std::fs::read(self.abs(rel))?;
+        let hash = blake3::hash(&content).to_hex().to_string();
+
+        match existing {
+            Some((id, _, _, old_hash)) => {
+                if old_hash == hash {
+                    let db = self.db.lock().unwrap();
+                    db.execute(
+                        "UPDATE assets SET size_bytes=?1, mtime=?2 WHERE id=?3",
+                        params![size, mtime, id],
+                    )?;
+                } else {
+                    self.update_asset_content(&id, &content, &hash, size, mtime, "外部修改")?;
+                    sum.updated += 1;
+                }
+            }
+            None => {
+                // New path: hash matches an in-library asset whose old path is gone → Finder move; rebind the path without losing history
+                let moved: Option<(String, String)> = {
+                    let db = self.db.lock().unwrap();
+                    db.query_row(
+                        "SELECT id, rel_path FROM assets WHERE current_hash=?1 LIMIT 1",
+                        [&hash],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()?
+                };
+                if let Some((id, old_rel)) = moved {
+                    if !self.abs(&old_rel).exists() {
+                        let db = self.db.lock().unwrap();
+                        db.execute(
+                            "UPDATE assets SET rel_path=?1, folder=?2, mtime=?3, updated_at=?4 WHERE id=?5",
+                            params![rel, parent_folder(rel), mtime, now(), id],
+                        )?;
+                        sum.moved += 1;
+                        return Ok(());
+                    }
+                }
+                self.insert_new_asset(rel, &content, &hash, size, mtime, "import", "初始导入")?;
+                sum.added += 1;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn insert_new_asset(
+        &self,
+        rel: &str,
+        content: &[u8],
+        hash: &str,
+        size: i64,
+        mtime: i64,
+        source: &str,
+        ver_label: &str,
+    ) -> Result<String> {
+        let id = Uuid::new_v4().to_string();
+        let text = String::from_utf8_lossy(content);
+        let ex = extract::extract(&text);
+        let title = ex.title.unwrap_or_else(|| file_stem(rel));
+        let t = now();
+        {
+            let db = self.db.lock().unwrap();
+            db.execute(
+                "INSERT INTO assets(id, rel_path, folder, title, source, current_hash, size_bytes, mtime, created_at, updated_at)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9)",
+                params![id, rel, parent_folder(rel), title, source, hash, size, mtime, t],
+            )?;
+            db.execute(
+                "INSERT INTO fts(asset_id, title, body) VALUES(?1,?2,?3)",
+                params![id, self.seg(&title), self.seg(&ex.body)],
+            )?;
+        }
+        self.write_version(&id, content, hash, ver_label)?;
+        // If a newly registered file carries Finder tags (import / restored from Trash / moved in externally), index them immediately
+        #[cfg(target_os = "macos")]
+        {
+            let disk = crate::tags_xattr::read_tags(&self.abs(rel));
+            if !disk.is_empty() {
+                self.set_tags_db(&id, &disk)?;
+            }
+        }
+        Ok(id)
+    }
+
+    /// Content change (external edit / rollback): update metadata and index, and append a full version
+    pub(crate) fn update_asset_content(
+        &self,
+        id: &str,
+        content: &[u8],
+        hash: &str,
+        size: i64,
+        mtime: i64,
+        ver_label: &str,
+    ) -> Result<()> {
+        let text = String::from_utf8_lossy(content);
+        let ex = extract::extract(&text);
+        {
+            let db = self.db.lock().unwrap();
+            let title: String = match ex.title {
+                Some(t) => t,
+                None => db.query_row("SELECT title FROM assets WHERE id=?1", [id], |r| r.get(0))?,
+            };
+            db.execute(
+                "UPDATE assets SET title=?1, current_hash=?2, size_bytes=?3, mtime=?4, updated_at=?5 WHERE id=?6",
+                params![title, hash, size, mtime, now(), id],
+            )?;
+            db.execute("DELETE FROM fts WHERE asset_id=?1", [id])?;
+            db.execute(
+                "INSERT INTO fts(asset_id, title, body) VALUES(?1,?2,?3)",
+                params![id, self.seg(&title), self.seg(&ex.body)],
+            )?;
+        }
+        self.write_version(id, content, hash, ver_label)?;
+        Ok(())
+    }
+
+    /// A version = a full file, stored at .harbly/versions/<asset_id>/vN.html
+    pub(crate) fn write_version(&self, asset_id: &str, content: &[u8], hash: &str, label: &str) -> Result<i64> {
+        let next: i64 = {
+            let db = self.db.lock().unwrap();
+            db.query_row(
+                "SELECT COALESCE(MAX(ver),0)+1 FROM versions WHERE asset_id=?1",
+                [asset_id],
+                |r| r.get(0),
+            )?
+        };
+        let dir = self.versions_dir().join(asset_id);
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(dir.join(format!("v{next}.html")), content)?;
+        let db = self.db.lock().unwrap();
+        db.execute(
+            "INSERT INTO versions(asset_id, ver, hash, label, size_bytes, created_at) VALUES(?1,?2,?3,?4,?5,?6)",
+            params![asset_id, next, hash, label, content.len() as i64, now()],
+        )?;
+        Ok(next)
+    }
+
+    pub(crate) fn remove_asset_rows(&self, id: &str, delete_version_files: bool) -> Result<()> {
+        {
+            let db = self.db.lock().unwrap();
+            db.execute("DELETE FROM assets WHERE id=?1", [id])?;
+            db.execute("DELETE FROM versions WHERE asset_id=?1", [id])?;
+            db.execute("DELETE FROM fts WHERE asset_id=?1", [id])?;
+            db.execute("DELETE FROM asset_tags WHERE asset_id=?1", [id])?;
+        }
+        if delete_version_files {
+            let _ = std::fs::remove_dir_all(self.versions_dir().join(id));
+        }
+        Ok(())
+    }
+
+    /// Import external files: dedupe by content hash, auto-suffix on name collision
+    pub fn import_files(&self, paths: &[PathBuf], dest_rel: &str) -> Result<ImportResult> {
+        let mut res = ImportResult::default();
+        let dest_dir = if dest_rel.is_empty() {
+            self.root().to_path_buf()
+        } else {
+            self.abs(dest_rel)
+        };
+        std::fs::create_dir_all(&dest_dir)?;
+
+        for p in paths {
+            if !is_html(p) {
+                res.skipped += 1;
+                continue;
+            }
+            let content = match std::fs::read(p) {
+                Ok(c) => c,
+                Err(_) => {
+                    res.skipped += 1;
+                    continue;
+                }
+            };
+            let hash = blake3::hash(&content).to_hex().to_string();
+            let dup: Option<String> = {
+                let db = self.db.lock().unwrap();
+                db.query_row("SELECT id FROM assets WHERE current_hash=?1 LIMIT 1", [&hash], |r| r.get(0))
+                    .optional()?
+            };
+            if let Some(existing) = dup {
+                res.duplicates += 1;
+                res.dup_of.push(existing);
+                continue;
+            }
+            let orig_name = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("导入.html")
+                .replace('/', "-");
+            let name = unique_name(&dest_dir, &orig_name);
+            if name != orig_name {
+                res.renamed += 1;
+            }
+            let dest = dest_dir.join(&name);
+            std::fs::write(&dest, &content)?;
+            let _ = crate::tags_xattr::copy_tags(p, &dest); // the source file's Finder tags are kept through import
+            let md = std::fs::metadata(&dest)?;
+            let mtime = md
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let rel = if dest_rel.is_empty() {
+                name.clone()
+            } else {
+                format!("{dest_rel}/{name}")
+            };
+            self.insert_new_asset(&rel, &content, &hash, content.len() as i64, mtime, "import", "初始导入")?;
+            res.imported.push(rel);
+            res.added += 1;
+        }
+        Ok(res)
+    }
+}

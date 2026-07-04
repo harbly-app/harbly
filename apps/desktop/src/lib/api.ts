@@ -1,0 +1,89 @@
+import { invoke } from "@tauri-apps/api/core";
+import type {
+  AssetMeta,
+  ImportResult,
+  ScanSummary,
+  SearchHit,
+  SortKey,
+  TagInfo,
+  TreeNode,
+} from "./types";
+
+export const api = {
+  libraryStatus: () => invoke<{ root: string | null }>("library_status"),
+  defaultLibraryPath: () => invoke<string>("default_library_path"),
+  pickFolder: () => invoke<string | null>("pick_folder"),
+  libraryInit: (path: string) => invoke<string>("library_init", { path }),
+  scanLibrary: () => invoke<ScanSummary>("scan_library"),
+  rescan: () => invoke<ScanSummary>("rescan"),
+  dirTree: () => invoke<TreeNode>("dir_tree"),
+  listAssets: (folder: string, sort: SortKey) =>
+    invoke<AssetMeta[]>("list_assets", { folder, sort }),
+  assetGet: (id: string) => invoke<AssetMeta>("asset_get", { id }),
+  inboxCount: () => invoke<number>("inbox_count"),
+  importPaths: (paths: string[], dest: string) =>
+    invoke<ImportResult>("import_paths", { paths, dest }),
+  pickAndImport: (dest: string) => invoke<ImportResult>("pick_and_import", { dest }),
+  search: (q: string) => invoke<SearchHit[]>("search_assets", { q }),
+  rename: (id: string, newName: string) =>
+    invoke<AssetMeta>("asset_rename", { id, newName }),
+  assetsMove: (ids: string[], dest: string) => invoke<number>("assets_move", { ids, dest }),
+  assetsTrash: (ids: string[]) =>
+    invoke<{ count: number; undoable: boolean }>("assets_trash", { ids }),
+  undoOp: () => invoke<{ label: string; count: number } | null>("undo_op"),
+  redoOp: () => invoke<{ label: string; count: number } | null>("redo_op"),
+  pasteboardCopy: (ids: string[]) => invoke<number>("pasteboard_copy", { ids }),
+  pasteboardPaste: (dest: string, moveItems: boolean) =>
+    invoke<{ count: number; moved: number; copied: number }>("pasteboard_paste", {
+      dest,
+      moveItems,
+    }),
+  forwardEdit: (action: "copy" | "paste" | "cut" | "selectAll" | "deleteToLineStart") =>
+    invoke<void>("forward_edit_action", { action }),
+  setLanguage: (lang: string) => invoke<void>("set_language", { lang }),
+  getLanguage: () => invoke<string>("get_language"),
+  revealAsset: (id: string) => invoke<void>("reveal_asset", { id }),
+  openInBrowser: (id: string) => invoke<void>("open_in_browser", { id }),
+  revealFolder: (rel: string) => invoke<void>("reveal_folder", { rel }),
+  createFolder: (parent: string, name: string) =>
+    invoke<string>("create_folder", { parent, name }),
+  folderRename: (rel: string, newName: string) =>
+    invoke<string>("folder_rename", { rel, newName }),
+  folderDelete: (rel: string) => invoke<boolean>("folder_delete", { rel }),
+  folderDuplicate: (rel: string) => invoke<string>("folder_duplicate", { rel }),
+  assetDuplicate: (id: string) => invoke<AssetMeta>("asset_duplicate", { id }),
+  setTags: (id: string, tags: string[]) => invoke<void>("set_tags", { id, tags }),
+  allTags: () => invoke<TagInfo[]>("all_tags"),
+  assetsByTag: (tag: string) => invoke<AssetMeta[]>("assets_by_tag", { tag }),
+  allowOnce: (id: string) => invoke<string>("asset_allow_once", { id }),
+  exportAsset: (id: string) => invoke<string | null>("export_asset", { id }),
+  exportFolder: (rel: string) => invoke<string | null>("export_folder", { rel }),
+  thumbsRebuild: () => invoke<void>("thumbs_rebuild"),
+  requestThumbs: (ids: string[]) => invoke<void>("request_thumbs", { ids }),
+};
+
+export const assetUrl = (id: string) =>
+  `harbly-asset://localhost/current/${encodeURIComponent(id)}`;
+
+export const thumbUrl = (hash: string) => `harbly-thumb://localhost/${hash}.jpg`;
+
+export function timeAgo(epochSec: number): string {
+  const s = Math.max(0, Math.floor(Date.now() / 1000) - epochSec);
+  if (s < 60) return "刚刚";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} 分钟前`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} 小时前`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d} 天前`;
+  const w = Math.floor(d / 7);
+  if (w < 5) return `${w} 周前`;
+  const dt = new Date(epochSec * 1000);
+  return `${dt.getFullYear()}/${dt.getMonth() + 1}/${dt.getDate()}`;
+}
+
+export function fmtSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
