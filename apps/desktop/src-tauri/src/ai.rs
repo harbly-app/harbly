@@ -8,9 +8,7 @@
 
 use crate::commands::{cur_lang, enqueue_missing_thumbs};
 use crate::state::AppState;
-use harbly_ai::{
-    AgentInfo, AgentKind, AiError, AiTask, ByokProvider, CancelFlag, Supply, TaskKind,
-};
+use harbly_ai::{AgentInfo, AgentKind, AiError, AiTask, ByokProvider, CancelFlag, Supply};
 use serde_json::json;
 use std::collections::HashMap;
 use tauri::ipc::Channel;
@@ -128,7 +126,6 @@ fn err_message(e: &AiError) -> String {
         AiError::Http(d) => format!("网络错误: {d}"),
         AiError::Provider(d) => format!("AI 服务错误: {d}"),
         AiError::Agent(d) => format!("本地 agent 出错: {d}"),
-        AiError::NoFileInReply => "AI 回复中没有可用的文件内容".to_string(),
         AiError::Io(d) => format!("IO 错误: {d}"),
     }
 }
@@ -169,31 +166,24 @@ async fn resolve_supply(supply: &str, model: Option<String>) -> Result<Supply, S
 }
 
 #[tauri::command]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "tauri IPC maps one arg per payload field; a params struct would just mirror them"
-)]
 pub async fn ai_run(
     app: AppHandle,
     job: String,
     id: String,
-    kind: String,
     instruction: String,
     supply: String,
     model: Option<String>,
     on_event: Channel<harbly_ai::AiEvent>,
 ) -> Result<harbly_core::AiRunRecord, String> {
+    let instruction = instruction.trim().to_string();
+    if instruction.is_empty() {
+        return Err("指令不能为空".to_string());
+    }
     let lib = app.state::<AppState>().lib()?;
     let asset = lib.asset(&id).map_err(|e| e.to_string())?;
     let content = lib.read_asset_text(&id).map_err(|e| e.to_string())?;
 
-    let task_kind = match kind.as_str() {
-        "revise" => TaskKind::Revise,
-        "review" => TaskKind::Review,
-        _ => return Err("未知的 AI 任务类型".to_string()),
-    };
     let task = AiTask {
-        kind: task_kind,
         instruction: instruction.clone(),
         file_name: asset.file_name.clone(),
         content,
@@ -225,9 +215,11 @@ pub async fn ai_run(
     };
     let result = harbly_ai::run_task(&task, &resolved, cancel, &mut sink).await;
 
+    // The record's kind is derived from the OUTCOME (file changed vs. textual
+    // reply), not declared upfront — there is no mode in the unified design.
     let mut new = harbly_core::NewAiRun {
         asset_id: id.clone(),
-        kind: kind.clone(),
+        kind: "reply".into(),
         supply: supply.clone(),
         model: match &resolved {
             Supply::Byok { model, .. } => model.clone(),
@@ -242,13 +234,12 @@ pub async fn ai_run(
 
     match result {
         Ok(out) => {
-            if let Some(report) = out.report {
-                new.report = Some(report);
-            }
+            new.report = out.reply;
             if let Some(text) = out.new_content {
                 let ver = lib
                     .apply_ai_output(&id, &text, AI_VERSION_LABEL)
                     .map_err(|e| e.to_string())?;
+                new.kind = "revise".into();
                 new.ver = Some(ver);
                 enqueue_missing_thumbs(&app);
                 let _ = app.emit("library-changed", ());

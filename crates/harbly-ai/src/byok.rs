@@ -5,8 +5,8 @@
 
 use crate::sse::SseParser;
 use crate::{
-    extract_file_from_reply, review_system, revise_system, user_message, AiError, AiEvent, AiTask,
-    ByokProvider, CancelFlag, EventSink, TaskKind, TaskOutput,
+    extract_file_from_reply, prose_before_fence, unified_system, user_message, AiError, AiEvent,
+    AiTask, ByokProvider, CancelFlag, EventSink, TaskOutput,
 };
 use futures_util::StreamExt;
 use serde_json::{json, Value};
@@ -33,28 +33,20 @@ pub(crate) async fn run(
     .await
     .map_err(|_| AiError::Timeout)??;
 
+    // Outcome classification: sentinel fence with different content = rewrite;
+    // everything else (prose, or a fenced no-op) = textual reply.
     let mut out = TaskOutput {
         assistant_text: text.clone(),
         ..TaskOutput::default()
     };
-    match task.kind {
-        TaskKind::Review => out.report = Some(text),
-        TaskKind::Revise => {
-            let content =
-                extract_file_from_reply(&text, task.is_markdown).ok_or(AiError::NoFileInReply)?;
-            if content.trim() != task.content.trim() {
-                out.new_content = Some(content);
-            }
+    match extract_file_from_reply(&text) {
+        Some(content) if content.trim() != task.content.trim() => {
+            out.new_content = Some(content);
         }
+        Some(_) => out.reply = Some(prose_before_fence(&text)),
+        None => out.reply = Some(text),
     }
     Ok(out)
-}
-
-fn system_prompt(task: &AiTask) -> String {
-    match task.kind {
-        TaskKind::Revise => revise_system(task),
-        TaskKind::Review => review_system(task),
-    }
 }
 
 async fn stream_completion(
@@ -78,7 +70,7 @@ async fn stream_completion(
             .json(&json!({
                 "model": model,
                 "max_tokens": ANTHROPIC_MAX_TOKENS,
-                "system": system_prompt(task),
+                "system": unified_system(task),
                 "messages": [{ "role": "user", "content": user_message(task) }],
                 "stream": true,
             })),
@@ -90,7 +82,7 @@ async fn stream_completion(
             let mut r = client.post(url).bearer_auth(api_key).json(&json!({
                 "model": model,
                 "messages": [
-                    { "role": "system", "content": system_prompt(task) },
+                    { "role": "system", "content": unified_system(task) },
                     { "role": "user", "content": user_message(task) },
                 ],
                 "stream": true,

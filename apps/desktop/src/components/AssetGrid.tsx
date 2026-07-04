@@ -519,7 +519,7 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
               />
               <MItem
                 icon={<Sparkles className="h-3.5 w-3.5" />}
-                label={t("aiMenuItem")}
+                label={t("aiPanelShow")}
                 hint="⌘J"
                 onClick={() => st().openAiFor(a.id)}
               />

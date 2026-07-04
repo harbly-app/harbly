@@ -98,12 +98,12 @@ export const api = {
   aiRunsList: (id: string, limit?: number) =>
     invoke<AiRun[]>("ai_runs_list", { id, limit: limit ?? null }),
   aiCancel: (job: string) => invoke<null>("ai_cancel", { job }),
-  /** Long-running: resolves when the task finishes; progress streams via `onEvent`. */
+  /** Long-running: resolves when the task finishes; progress streams via `onEvent`.
+   * No task kind — intent is routed by the model, outcome classified by diff. */
   aiRun: (
     args: {
       job: string;
       id: string;
-      kind: "revise" | "review";
       instruction: string;
       supply: string;
       model?: string;

@@ -4,7 +4,7 @@
 //! the agent process. Zero API cost — the user's existing CLI subscription
 //! does the work.
 
-use crate::{AgentKind, AiError, AiEvent, AiTask, CancelFlag, EventSink, TaskKind, TaskOutput};
+use crate::{AgentKind, AiError, AiEvent, AiTask, CancelFlag, EventSink, TaskOutput};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -122,36 +122,20 @@ pub async fn detect_agent(kind: AgentKind) -> Option<AgentInfo> {
 
 fn agent_prompt(task: &AiTask) -> String {
     let kind = if task.is_markdown { "Markdown" } else { "HTML" };
-    match task.kind {
-        TaskKind::Revise => format!(
-            "You are working in a scratch directory containing a single file `{name}` — a \
-             self-contained {kind} asset from the user's library (title: {title}).\n\
-             Apply this instruction to that file, editing it in place:\n{instruction}\n\n\
-             Rules: modify only `{name}`; keep it self-contained; do not create, rename or \
-             delete files; do not run package managers or network commands. \
-             When finished, reply with one line in {lang} summarizing what changed.",
-            name = task.file_name,
-            title = task.title,
-            instruction = task.instruction,
-            lang = task.reply_lang,
-        ),
-        TaskKind::Review => format!(
-            "Read the file `{name}` in the current directory — a self-contained {kind} asset \
-             from the user's library (title: {title}). Do not modify anything.\n\
-             Produce a concise, actionable review in compact markdown covering: security \
-             (scripts, external requests, data collection), usability and accessibility, copy \
-             quality, and a short prioritized fix list.{focus}\n\
-             Respond entirely in {lang}.",
-            name = task.file_name,
-            title = task.title,
-            focus = if task.instruction.trim().is_empty() {
-                String::new()
-            } else {
-                format!(" Extra focus: {}.", task.instruction)
-            },
-            lang = task.reply_lang,
-        ),
-    }
+    format!(
+        "You are working in a scratch directory containing a single file `{name}` — a \
+         self-contained {kind} asset from the user's library (title: {title}).\n\
+         The user's instruction about this file:\n{instruction}\n\n\
+         If the instruction asks for changes: edit `{name}` in place — modify only that file, \
+         keep it self-contained, do not create, rename or delete files, and do not run package \
+         managers or network commands; finish with one line in {lang} summarizing what changed.\n\
+         If it is a question or a review request: do not modify anything; answer it directly \
+         in concise markdown, in {lang}.",
+        name = task.file_name,
+        title = task.title,
+        instruction = task.instruction,
+        lang = task.reply_lang,
+    )
 }
 
 fn build_command(task: &AiTask, kind: AgentKind, program: &str, workdir: &Path) -> Command {
@@ -159,15 +143,14 @@ fn build_command(task: &AiTask, kind: AgentKind, program: &str, workdir: &Path) 
     let mut cmd = Command::new(program);
     match kind {
         AgentKind::ClaudeCode => {
+            // acceptEdits always: it permits edits (scratch copy only), it does
+            // not force them — intent routing lives in the prompt, and the
+            // post-run diff decides whether anything actually changed.
             cmd.arg("-p")
                 .arg(&prompt)
                 .args(["--output-format", "stream-json", "--verbose"])
-                .args(["--max-turns", "40"]);
-            // Auto-accept edits only when we actually want the file rewritten;
-            // reviews run with default permissions (read-only tools need none).
-            if task.kind == TaskKind::Revise {
-                cmd.args(["--permission-mode", "acceptEdits"]);
-            }
+                .args(["--max-turns", "40"])
+                .args(["--permission-mode", "acceptEdits"]);
         }
         AgentKind::Codex => {
             cmd.args(["exec", "--json", "--full-auto", "--skip-git-repo-check"])
@@ -261,25 +244,22 @@ pub(crate) async fn run(
         }));
     }
 
+    // Outcome by observation: the scratch copy changed → it's a rewrite; it
+    // didn't → the agent's text IS the reply (answer / review / no-op note).
     let assistant_text = parser.assistant_text();
     let mut out = TaskOutput {
         assistant_text: assistant_text.clone(),
         ..TaskOutput::default()
     };
-    match task.kind {
-        TaskKind::Review => {
-            let report = parser.final_text.clone().unwrap_or(assistant_text);
-            if report.trim().is_empty() {
-                return Err(AiError::Agent("empty report".into()));
-            }
-            out.report = Some(report);
+    let after = std::fs::read_to_string(&file_path)?;
+    if after != task.content {
+        out.new_content = Some(after);
+    } else {
+        let reply = parser.final_text.clone().unwrap_or(assistant_text);
+        if reply.trim().is_empty() {
+            return Err(AiError::Agent("empty reply".into()));
         }
-        TaskKind::Revise => {
-            let after = std::fs::read_to_string(&file_path)?;
-            if after != task.content {
-                out.new_content = Some(after);
-            }
-        }
+        out.reply = Some(reply);
     }
     Ok(out)
 }
@@ -469,9 +449,8 @@ fn truncate(s: &str, max: usize) -> String {
 mod tests {
     use super::*;
 
-    fn revise_task() -> AiTask {
+    fn task() -> AiTask {
         AiTask {
-            kind: TaskKind::Revise,
             instruction: "dark theme".into(),
             file_name: "a.html".into(),
             content: "<html></html>".into(),
@@ -533,17 +512,12 @@ mod tests {
     }
 
     #[test]
-    fn prompt_shapes() {
-        let t = revise_task();
-        let p = agent_prompt(&t);
+    fn prompt_carries_both_branches() {
+        let p = agent_prompt(&task());
         assert!(p.contains("`a.html`"));
         assert!(p.contains("dark theme"));
-        let mut r = t.clone();
-        r.kind = TaskKind::Review;
-        r.instruction = String::new();
-        let p = agent_prompt(&r);
-        assert!(p.contains("Do not modify"));
-        assert!(!p.contains("Extra focus"));
+        assert!(p.contains("If the instruction asks for changes"));
+        assert!(p.contains("do not modify anything"));
     }
 
     #[tokio::test]
@@ -562,7 +536,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let task = revise_task();
+        let task = task();
         let mut events = vec![];
         let out = run(
             &task,
@@ -586,7 +560,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let task = revise_task();
+        let task = task();
         let cancel = CancelFlag::new();
         let c2 = cancel.clone();
         tokio::spawn(async move {

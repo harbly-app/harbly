@@ -6,7 +6,7 @@
 //! cargo run -p harbly-ai --example agent_smoke
 //! ```
 
-use harbly_ai::{detect_agent, run_task, AgentKind, AiEvent, AiTask, CancelFlag, Supply, TaskKind};
+use harbly_ai::{detect_agent, run_task, AgentKind, AiEvent, AiTask, CancelFlag, Supply};
 
 #[tokio::main]
 async fn main() {
@@ -21,7 +21,6 @@ async fn main() {
     );
 
     let task = AiTask {
-        kind: TaskKind::Revise,
         instruction: "Change the <h1> text to exactly 'Harbly Smoke OK' and give the body a \
                       #0b1021 background with white text."
             .into(),

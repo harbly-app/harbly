@@ -31,7 +31,6 @@ interface SupplyOption {
 
 interface LiveRun {
   job: string;
-  kind: "revise" | "review";
   instruction: string;
   actions: string[];
   text: string;
@@ -102,7 +101,6 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
   const [supply, setSupply] = useState<AiSupply | null>(null);
   const [versions, setVersions] = useState<VersionInfo[]>([]);
   const [runs, setRuns] = useState<AiRun[]>([]);
-  const [mode, setMode] = useState<"revise" | "review">("revise");
   const [input, setInput] = useState("");
   const [live, setLive] = useState<LiveRun | null>(null);
   const [result, setResult] = useState<AiRun | null>(null);
@@ -169,20 +167,21 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
     api.aiSetConfig(next).catch(() => {});
   };
 
-  const send = async (kind: "revise" | "review") => {
+  // One send path for everything: change requests, questions, reviews. The
+  // model routes intent; the backend classifies the outcome by diff.
+  const send = async () => {
     if (live || !supply) return;
     const instruction = input.trim();
-    if (kind === "revise" && !instruction) return;
+    if (!instruction) return;
     const job = crypto.randomUUID();
     setResult(null);
     setInput("");
-    setLive({ job, kind, instruction, actions: [], text: "" });
+    setLive({ job, instruction, actions: [], text: "" });
     try {
       const record = await api.aiRun(
         {
           job,
           id: asset.id,
-          kind,
           instruction,
           supply,
           model:
@@ -307,24 +306,16 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
       )}
 
       <footer className="shrink-0 border-t border-line p-3">
+        {/* Templates, not modes: each chip just fills the input with a starter
+            instruction — sending works the same for changes and questions */}
         <div className="mb-2 flex gap-1.5">
           <Chip
-            active={mode === "revise"}
-            label={t("aiChipRevise")}
-            onClick={() => setMode("revise")}
-          />
-          <Chip
-            active={mode === "review"}
             label="Review"
-            onClick={() => setMode("review")}
+            onClick={() => setInput(t("aiReviewTemplate"))}
           />
           <Chip
-            active={false}
             label={t("aiChipTranslate")}
-            onClick={() => {
-              setMode("revise");
-              setInput(t("aiTranslateTemplate"));
-            }}
+            onClick={() => setInput(t("aiTranslateTemplate"))}
           />
         </div>
         <div className="flex items-end gap-2">
@@ -338,16 +329,12 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
                 !e.nativeEvent.isComposing
               ) {
                 e.preventDefault();
-                void send(mode);
+                void send();
               }
             }}
             rows={2}
             disabled={!!live || empty}
-            placeholder={
-              mode === "review"
-                ? t("aiReviewPlaceholder")
-                : t("aiPlaceholder", { name: asset.fileName })
-            }
+            placeholder={t("aiPlaceholder", { name: asset.fileName })}
             className="max-h-32 min-h-[38px] flex-1 resize-none rounded-ctl border border-line bg-side px-2.5 py-2 text-xs outline-none placeholder:text-sub focus:border-primary disabled:opacity-50"
           />
           {live ? (
@@ -360,10 +347,8 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
             </button>
           ) : (
             <button
-              onClick={() => void send(mode)}
-              disabled={
-                empty || !supply || (mode === "revise" && !input.trim())
-              }
+              onClick={() => void send()}
+              disabled={empty || !supply || !input.trim()}
               title={t("aiSend")}
               className="grid h-8 w-8 shrink-0 place-items-center rounded-ctl bg-primary text-white transition hover:bg-primary-light disabled:opacity-35"
             >
@@ -376,23 +361,11 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
   );
 }
 
-function Chip({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-}) {
+function Chip({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className={`h-6 rounded-full border px-2.5 text-[11px] transition ${
-        active
-          ? "border-primary/40 bg-primary/10 font-bold text-primary"
-          : "border-line bg-side text-sub2 hover:border-primary/40"
-      }`}
+      className="h-6 rounded-full border border-line bg-side px-2.5 text-[11px] text-sub2 transition hover:border-primary/40"
     >
       {label}
     </button>
@@ -474,13 +447,17 @@ function VersionRow({
 }
 
 function RunRow({ run, t }: { run: AiRun; t: TFn }) {
-  if (run.kind === "review" && run.status === "ok" && run.report) {
+  // Any successful textual reply renders as a card: answers, reviews, and
+  // legacy "review" records all share this shape.
+  if (run.status === "ok" && run.report) {
     return (
       <div className="rounded-ctl border border-line bg-card px-3 py-2.5">
-        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold text-primary">
-          <Sparkles className="h-3 w-3" />
-          {t("aiReportTitle")}
-          <span className="ml-auto font-normal text-sub">
+        <div className="mb-1.5 flex items-start gap-1.5 text-[11px] font-bold text-primary">
+          <Sparkles className="mt-0.5 h-3 w-3 shrink-0" />
+          <span className="line-clamp-2 min-w-0 flex-1">
+            {run.instruction.trim() || t("aiReportTitle")}
+          </span>
+          <span className="shrink-0 font-normal text-sub">
             {timeAgo(run.createdAt)}
           </span>
         </div>
@@ -563,11 +540,7 @@ function ResultCard({
   onDiff: () => void;
   onRollback: () => void;
 }) {
-  if (
-    result.status === "ok" &&
-    result.kind === "revise" &&
-    result.ver != null
-  ) {
+  if (result.status === "ok" && result.ver != null) {
     return (
       <div className="rounded-ctl border border-primary/25 bg-primary/8 px-3 py-2.5">
         <div className="flex items-center gap-1.5 text-xs font-bold text-primary">
@@ -596,8 +569,10 @@ function ResultCard({
       </div>
     );
   }
-  if (result.status === "ok" && result.kind === "revise") {
-    return (
+  if (result.status === "ok") {
+    // Textual replies show as a timeline card after reload; only a run that
+    // produced neither a version nor a reply needs an inline note.
+    return result.report ? null : (
       <div className="text-center text-[11px] text-sub">{t("aiNoChange")}</div>
     );
   }
@@ -608,16 +583,10 @@ function ResultCard({
       </div>
     );
   }
-  if (result.status === "error") {
-    return (
-      <div className="flex items-start gap-2 rounded-ctl border border-danger/25 bg-danger/5 px-3 py-2 text-[11.5px] leading-relaxed text-danger">
-        <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        <span className="select-text">
-          {localizeAiError(result.error ?? "")}
-        </span>
-      </div>
-    );
-  }
-  // Review success renders as a timeline report card after reload; nothing extra here
-  return null;
+  return (
+    <div className="flex items-start gap-2 rounded-ctl border border-danger/25 bg-danger/5 px-3 py-2 text-[11.5px] leading-relaxed text-danger">
+      <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span className="select-text">{localizeAiError(result.error ?? "")}</span>
+    </div>
+  );
 }

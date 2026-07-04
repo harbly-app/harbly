@@ -100,7 +100,8 @@ export type AiEvent =
 export interface AiRun {
   id: string;
   assetId: string;
-  kind: "revise" | "review";
+  /** Outcome-derived: "revise" (produced a version) | "reply" (textual answer) */
+  kind: string;
   supply: AiSupply;
   model: string;
   instruction: string;

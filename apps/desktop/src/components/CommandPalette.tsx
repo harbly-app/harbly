@@ -125,7 +125,7 @@ function PaletteBody() {
                 className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 data-[selected=true]:bg-primary/10"
               >
                 <Sparkles className="h-4 w-4 shrink-0 text-primary" />
-                <span className="text-[12.5px]">{t("aiCommand")}</span>
+                <span className="text-[12.5px]">{t("aiPanelShow")}</span>
                 <span className="flex-1" />
                 <kbd className="rounded border border-line bg-side px-1.5 py-0.5 text-[10px] text-sub">
                   ⌘J
