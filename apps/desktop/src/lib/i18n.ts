@@ -190,10 +190,6 @@ const zhCN: Dict = {
   aiSupply: "AI 供给",
   aiSupplyLocal: "本地",
   aiPlaceholder: "对 {name} 下指令，或问它任何问题…",
-  aiChipTranslate: "翻译",
-  aiReviewTemplate:
-    "给这个页面做一次体检：从安全（脚本、外链请求、数据收集）、可用性与无障碍、文案质量三方面给出简明报告，并列出按优先级排序的修复清单。不要修改文件。",
-  aiTranslateTemplate: "把页面里的文字全部翻译成英文，保持布局、样式和代码不变",
   aiSend: "发送",
   aiStop: "停止",
   aiRunning: "正在运行…",
@@ -386,11 +382,6 @@ const zhTW: Dict = {
   aiSupply: "AI 供給",
   aiSupplyLocal: "本機",
   aiPlaceholder: "對 {name} 下指令，或問它任何問題…",
-  aiChipTranslate: "翻譯",
-  aiReviewTemplate:
-    "幫這個頁面做一次健檢：從安全（腳本、外部連線、資料蒐集）、可用性與無障礙、文案品質三方面給出簡明報告，並列出按優先級排序的修復清單。不要修改檔案。",
-  aiTranslateTemplate:
-    "把頁面裡的文字全部翻譯成英文，保持版面、樣式和程式碼不變",
   aiSend: "傳送",
   aiStop: "停止",
   aiRunning: "正在執行…",
@@ -597,11 +588,6 @@ const en: Dict = {
   aiSupply: "AI supply",
   aiSupplyLocal: "local",
   aiPlaceholder: "Change {name} — or ask anything about it…",
-  aiChipTranslate: "Translate",
-  aiReviewTemplate:
-    "Review this page: give a concise report on security (scripts, external requests, data collection), usability and accessibility, and copy quality, with a prioritized fix list. Do not modify the file.",
-  aiTranslateTemplate:
-    "Translate all visible text on the page into Chinese; keep layout, styles and code unchanged",
   aiSend: "Send",
   aiStop: "Stop",
   aiRunning: "Running…",
@@ -797,11 +783,6 @@ const ja: Dict = {
   aiSupply: "AI サプライ",
   aiSupplyLocal: "ローカル",
   aiPlaceholder: "{name} への指示、または質問を入力…",
-  aiChipTranslate: "翻訳",
-  aiReviewTemplate:
-    "このページをレビューして：セキュリティ（スクリプト、外部リクエスト、データ収集）、ユーザビリティとアクセシビリティ、文章品質の3点について簡潔なレポートと優先順位付きの修正リストを出して。ファイルは変更しないで。",
-  aiTranslateTemplate:
-    "ページ内のテキストをすべて日本語に翻訳し、レイアウト・スタイル・コードは変更しない",
   aiSend: "送信",
   aiStop: "停止",
   aiRunning: "実行中…",
@@ -999,11 +980,6 @@ const ko: Dict = {
   aiSupply: "AI 공급",
   aiSupplyLocal: "로컬",
   aiPlaceholder: "{name}에 지시하거나 무엇이든 질문…",
-  aiChipTranslate: "번역",
-  aiReviewTemplate:
-    "이 페이지를 리뷰해 줘: 보안(스크립트, 외부 요청, 데이터 수집), 사용성과 접근성, 문구 품질 세 가지 측면의 간결한 리포트와 우선순위별 수정 목록을 제시해 줘. 파일은 수정하지 마.",
-  aiTranslateTemplate:
-    "페이지의 모든 텍스트를 한국어로 번역하고 레이아웃·스타일·코드는 그대로 유지",
   aiSend: "보내기",
   aiStop: "중지",
   aiRunning: "실행 중…",
@@ -1212,11 +1188,6 @@ const es: Dict = {
   aiSupply: "Proveedor de IA",
   aiSupplyLocal: "local",
   aiPlaceholder: "Cambia {name} — o pregunta lo que quieras…",
-  aiChipTranslate: "Traducir",
-  aiReviewTemplate:
-    "Revisa esta página: informe conciso sobre seguridad (scripts, solicitudes externas, recopilación de datos), usabilidad y accesibilidad, y calidad del texto, con una lista de correcciones priorizada. No modifiques el archivo.",
-  aiTranslateTemplate:
-    "Traduce todo el texto visible de la página al español; mantén el diseño, los estilos y el código sin cambios",
   aiSend: "Enviar",
   aiStop: "Detener",
   aiRunning: "En ejecución…",

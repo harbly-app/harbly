@@ -306,18 +306,6 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
       )}
 
       <footer className="shrink-0 border-t border-line p-3">
-        {/* Templates, not modes: each chip just fills the input with a starter
-            instruction — sending works the same for changes and questions */}
-        <div className="mb-2 flex gap-1.5">
-          <Chip
-            label="Review"
-            onClick={() => setInput(t("aiReviewTemplate"))}
-          />
-          <Chip
-            label={t("aiChipTranslate")}
-            onClick={() => setInput(t("aiTranslateTemplate"))}
-          />
-        </div>
         <div className="flex items-end gap-2">
           <textarea
             value={input}
@@ -358,17 +346,6 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
         </div>
       </footer>
     </aside>
-  );
-}
-
-function Chip({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="h-6 rounded-full border border-line bg-side px-2.5 text-[11px] text-sub2 transition hover:border-primary/40"
-    >
-      {label}
-    </button>
   );
 }
 
