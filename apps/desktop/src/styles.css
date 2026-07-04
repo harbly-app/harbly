@@ -14,7 +14,8 @@
   --color-ok: #28a96a;
   --color-warn: #eab308;
   --color-danger: #e5484d;
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Noto Sans SC", "Helvetica Neue", Arial, sans-serif;
   --radius-card: 16px;
   --radius-ctl: 10px;

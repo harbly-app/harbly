@@ -1,0 +1,23 @@
+# Single source of truth for formatting scope (scripts pass --ignore-path to
+# override Prettier's default .gitignore coupling, so the temporarily
+# git-ignored apps/landing still gets formatted).
+
+# Build output
+dist/
+target/
+
+# Generated code
+apps/desktop/src-tauri/gen/
+
+# Caches
+.vite/
+.astro/
+
+# Internal, never-published notes
+docs/
+.claude/
+
+# Lockfiles
+pnpm-lock.yaml
+
+*.local

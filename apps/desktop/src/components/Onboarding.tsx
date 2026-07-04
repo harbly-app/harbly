@@ -18,7 +18,10 @@ export default function Onboarding() {
   const unlisten = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    api.defaultLibraryPath().then(setDefaultPath).catch(() => {});
+    api
+      .defaultLibraryPath()
+      .then(setDefaultPath)
+      .catch(() => {});
     return () => unlisten.current?.();
   }, []);
 
@@ -29,7 +32,7 @@ export default function Onboarding() {
       await api.libraryInit(path);
       setStep(1);
       unlisten.current = await listen<ScanProgress>("scan-progress", (e) =>
-        setProgress(e.payload)
+        setProgress(e.payload),
       );
       api
         .scanLibrary()
@@ -51,22 +54,27 @@ export default function Onboarding() {
 
   const adoptExisting = async () => {
     const dir = await api.pickFolder();
-    if (dir) start(dir);
+    if (dir) await start(dir);
   };
 
   // Split "create at {path}…" per-language word order; the path segment uses a monospace font
   const [descPre, descPost] = t("obNewLibDesc").split("{path}");
 
   return (
-    <div className="h-screen flex flex-col items-center justify-center bg-paper" data-tauri-drag-region>
+    <div
+      className="flex h-screen flex-col items-center justify-center bg-paper"
+      data-tauri-drag-region
+    >
       <div className="w-[520px]">
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-10 h-10 rounded-[13px] bg-primary text-white grid place-items-center text-base font-extrabold">
+        <div className="mb-8 flex items-center gap-3">
+          <div className="grid h-10 w-10 place-items-center rounded-[13px] bg-primary text-base font-extrabold text-white">
             {"</>"}
           </div>
           <div>
             <div className="text-xl font-extrabold">{t("welcome")}</div>
-            <div className="text-xs text-sub mt-0.5">{step === 0 ? t("obStep0") : t("obStep1")}</div>
+            <div className="mt-0.5 text-xs text-sub">
+              {step === 0 ? t("obStep0") : t("obStep1")}
+            </div>
           </div>
         </div>
 
@@ -75,13 +83,13 @@ export default function Onboarding() {
             <button
               onClick={createNew}
               disabled={busy}
-              className="w-full text-left bg-card border border-line rounded-card p-4 hover:border-primary/50 hover:shadow-sm transition group disabled:opacity-50"
+              className="group w-full rounded-card border border-line bg-card p-4 text-left transition hover:border-primary/50 hover:shadow-sm disabled:opacity-50"
             >
               <div className="flex items-center gap-3">
-                <FolderPlus className="w-5 h-5 text-primary" />
+                <FolderPlus className="h-5 w-5 text-primary" />
                 <div className="flex-1">
                   <div className="font-bold">{t("obNewLib")}</div>
-                  <div className="text-xs text-sub mt-0.5">
+                  <div className="mt-0.5 text-xs text-sub">
                     {descPre}
                     <span className="font-mono">{defaultPath}</span>
                     {descPost}
@@ -90,9 +98,9 @@ export default function Onboarding() {
                 <span
                   onClick={(e) => {
                     e.stopPropagation();
-                    changeLocation();
+                    void changeLocation();
                   }}
-                  className="text-xs text-primary hover:underline shrink-0"
+                  className="shrink-0 text-xs text-primary hover:underline"
                 >
                   {t("obChangeLocation")}
                 </span>
@@ -102,37 +110,47 @@ export default function Onboarding() {
             <button
               onClick={adoptExisting}
               disabled={busy}
-              className="w-full text-left bg-card border border-line rounded-card p-4 hover:border-primary/50 hover:shadow-sm transition disabled:opacity-50"
+              className="w-full rounded-card border border-line bg-card p-4 text-left transition hover:border-primary/50 hover:shadow-sm disabled:opacity-50"
             >
               <div className="flex items-center gap-3">
-                <FolderOpen className="w-5 h-5 text-primary" />
+                <FolderOpen className="h-5 w-5 text-primary" />
                 <div>
                   <div className="font-bold">{t("obAdopt")}</div>
-                  <div className="text-xs text-sub mt-0.5">{t("obAdoptDesc")}</div>
+                  <div className="mt-0.5 text-xs text-sub">
+                    {t("obAdoptDesc")}
+                  </div>
                 </div>
               </div>
             </button>
 
             {err && <div className="text-xs text-danger">{err}</div>}
 
-            <p className="text-[11px] leading-relaxed text-sub pt-2">{t("obFootnote")}</p>
+            <p className="pt-2 text-[11px] leading-relaxed text-sub">
+              {t("obFootnote")}
+            </p>
           </div>
         )}
 
         {step === 1 && (
-          <div className="bg-card border border-line rounded-card p-5">
+          <div className="rounded-card border border-line bg-card p-5">
             <div className="flex items-center gap-2 text-sm font-bold">
-              {!scanDone && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
+              {!scanDone && (
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              )}
               {scanDone ? t("scanDone") : t("scanningTitle")}
             </div>
             <div className="mt-3 space-y-1.5 text-xs text-sub2">
               <div className="flex justify-between">
                 <span>{t("foundFiles")}</span>
-                <span className="font-semibold">{t("countUnit", { n: progress?.found ?? 0 })}</span>
+                <span className="font-semibold">
+                  {t("countUnit", { n: progress?.found ?? 0 })}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span>{t("indexedFiles")}</span>
-                <span className="font-semibold">{t("countUnit", { n: progress?.indexed ?? 0 })}</span>
+                <span className="font-semibold">
+                  {t("countUnit", { n: progress?.indexed ?? 0 })}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span>{t("thumbsRow")}</span>
@@ -141,12 +159,14 @@ export default function Onboarding() {
             </div>
             <button
               onClick={enterMain}
-              className="mt-5 w-full bg-primary text-white rounded-ctl py-2.5 text-sm font-bold hover:bg-primary-light transition"
+              className="mt-5 w-full rounded-ctl bg-primary py-2.5 text-sm font-bold text-white transition hover:bg-primary-light"
             >
               {t("enterApp")}
             </button>
             {!scanDone && (
-              <div className="text-center text-[11px] text-sub mt-2">{t("scanContinuesBg")}</div>
+              <div className="mt-2 text-center text-[11px] text-sub">
+                {t("scanContinuesBg")}
+              </div>
             )}
           </div>
         )}

@@ -63,7 +63,9 @@ impl Library {
     }
 
     pub fn version_file_path(&self, asset_id: &str, ver: i64) -> PathBuf {
-        self.versions_dir().join(asset_id).join(format!("v{ver}.html"))
+        self.versions_dir()
+            .join(asset_id)
+            .join(format!("v{ver}.html"))
     }
 
     /// Relative path → absolute path. Rejects path traversal.
@@ -98,12 +100,16 @@ pub(crate) fn is_html(p: &Path) -> bool {
 }
 
 pub(crate) fn parent_folder(rel: &str) -> String {
-    rel.rsplit_once('/').map(|(a, _)| a.to_string()).unwrap_or_default()
+    rel.rsplit_once('/')
+        .map(|(a, _)| a.to_string())
+        .unwrap_or_default()
 }
 
 pub(crate) fn file_stem(rel: &str) -> String {
     let name = rel.rsplit('/').next().unwrap_or(rel);
-    name.rsplit_once('.').map(|(a, _)| a.to_string()).unwrap_or_else(|| name.to_string())
+    name.rsplit_once('.')
+        .map(|(a, _)| a.to_string())
+        .unwrap_or_else(|| name.to_string())
 }
 
 pub(crate) fn is_hidden_component(name: &std::ffi::OsStr) -> bool {

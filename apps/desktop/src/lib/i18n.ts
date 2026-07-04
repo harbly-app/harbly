@@ -17,7 +17,13 @@ export const LANGS = [
 
 export type Lang = (typeof LANGS)[number]["code"];
 
-const zhCN: Record<string, string> = {
+/** Runtime guard for strings from localStorage / backend config */
+export const isLang = (s: string): s is Lang => LANGS.some((l) => l.code === s);
+
+/** Lookups may miss: plural variants exist only in some languages, and new keys can lag behind translations */
+type Dict = Record<string, string | undefined>;
+
+const zhCN: Dict = {
   // Common actions
   open: "打开",
   openInBrowser: "在浏览器打开",
@@ -114,7 +120,8 @@ const zhCN: Record<string, string> = {
   movedNTo: "已移动 {n} 项到 {dest}",
   folderTrashed: "文件夹已移入废纸篓",
   confirmDelFolderTitle: "删除文件夹？",
-  confirmDelFolderBody: "“{name}”不是空的，其中内容将一并移入废纸篓。可随时按 ⌘Z 撤销。",
+  confirmDelFolderBody:
+    "“{name}”不是空的，其中内容将一并移入废纸篓。可随时按 ⌘Z 撤销。",
   confirmDelete: "删除",
   folderDuplicated: "已创建文件夹副本",
   duplicatedAs: "已复制为「{name}」",
@@ -170,7 +177,7 @@ const zhCN: Record<string, string> = {
   countUnit: "{n} 个",
 };
 
-const zhTW: Record<string, string> = {
+const zhTW: Dict = {
   open: "打開",
   openInBrowser: "在瀏覽器打開",
   revealInFinder: "在 Finder 中顯示",
@@ -261,7 +268,8 @@ const zhTW: Record<string, string> = {
   movedNTo: "已移動 {n} 個項目到 {dest}",
   folderTrashed: "檔案夾已丟到垃圾桶",
   confirmDelFolderTitle: "刪除檔案夾？",
-  confirmDelFolderBody: "「{name}」不是空的，其中內容將一併丟到垃圾桶。可隨時按 ⌘Z 撤銷。",
+  confirmDelFolderBody:
+    "「{name}」不是空的，其中內容將一併丟到垃圾桶。可隨時按 ⌘Z 撤銷。",
   confirmDelete: "刪除",
   folderDuplicated: "已建立檔案夾副本",
   duplicatedAs: "已複製為「{name}」",
@@ -315,7 +323,7 @@ const zhTW: Record<string, string> = {
   countUnit: "{n} 個",
 };
 
-const en: Record<string, string> = {
+const en: Dict = {
   open: "Open",
   openInBrowser: "Open in Browser",
   revealInFinder: "Reveal in Finder",
@@ -374,9 +382,11 @@ const en: Record<string, string> = {
   scanMoved: "{n} moved",
   scanRemoved: "{n} cleaned",
   blockedN: "Sandbox blocked {n} external requests · Allow once",
-  allowedTemp: "External requests temporarily allowed · Click to restore sandbox",
+  allowedTemp:
+    "External requests temporarily allowed · Click to restore sandbox",
   moveTitle: "Move “{name}” to…",
-  moveHint: "Move = a real mv on disk · name clashes auto-suffixed · undoable with ⌘Z",
+  moveHint:
+    "Move = a real mv on disk · name clashes auto-suffixed · undoable with ⌘Z",
   newFolderIn: " (inside {name})",
   folderNamePlaceholder: "Folder name",
   tagsTitle: "Tags · {name}",
@@ -394,7 +404,8 @@ const en: Record<string, string> = {
   themeDark: "Dark",
   themeSystem: "Auto",
   aboutLine: "Harbly 0.1.0 · local-first HTML asset manager · AGPL-3.0",
-  aboutLine2: "Data is just a folder: index & thumbnails live in .harbly/ inside your library",
+  aboutLine2:
+    "Data is just a folder: index & thumbnails live in .harbly/ inside your library",
   thumbsRebuilding: "Thumbnails are regenerating in the background",
   switchedLibrary: "Switched library to {name}",
   trashedOne: "Moved to Trash",
@@ -411,7 +422,8 @@ const en: Record<string, string> = {
   movedNToOne: "Moved {n} item to {dest}",
   folderTrashed: "Folder moved to Trash",
   confirmDelFolderTitle: "Delete Folder?",
-  confirmDelFolderBody: "“{name}” isn’t empty — its contents will move to the Trash too. You can undo with ⌘Z anytime.",
+  confirmDelFolderBody:
+    "“{name}” isn’t empty — its contents will move to the Trash too. You can undo with ⌘Z anytime.",
   confirmDelete: "Delete",
   folderDuplicated: "Folder duplicated",
   duplicatedAs: "Duplicated as “{name}”",
@@ -452,10 +464,12 @@ const en: Record<string, string> = {
   obStep0: "Pick a home for your HTML assets — a plain local folder",
   obStep1: "Building index and thumbnails — read-only, nothing is modified",
   obNewLib: "Create a new library",
-  obNewLibDesc: "Creates an empty folder at {path} · put it in iCloud / any drive to sync",
+  obNewLibDesc:
+    "Creates an empty folder at {path} · put it in iCloud / any drive to sync",
   obChangeLocation: "Change location…",
   obAdopt: "Turn an existing folder into a library",
-  obAdoptDesc: "Point at the folder where your HTML already lives — adopted in place, files untouched",
+  obAdoptDesc:
+    "Point at the folder where your HTML already lives — adopted in place, files untouched",
   obFootnote:
     "Your data is always plain files on disk: visible in Finder, manageable with git, yours even if you uninstall Harbly. The app index lives in the hidden .harbly/ folder inside your library.",
   scanningTitle: "Scanning library",
@@ -465,11 +479,12 @@ const en: Record<string, string> = {
   thumbsBg: "generating in background",
   thumbsWaiting: "waiting",
   enterApp: "Enter Harbly →",
-  scanContinuesBg: "You can enter anytime — scanning continues in the background",
+  scanContinuesBg:
+    "You can enter anytime — scanning continues in the background",
   countUnit: "{n}",
 };
 
-const ja: Record<string, string> = {
+const ja: Dict = {
   open: "開く",
   openInBrowser: "ブラウザで開く",
   revealInFinder: "Finder に表示",
@@ -506,7 +521,8 @@ const ja: Record<string, string> = {
   sortModified: "変更日",
   sortName: "名前",
   emptyInboxTitle: "インボックスは空です",
-  emptyInboxDesc: "新しく読み込んだファイルはまずここに入り、フォルダへ整理します",
+  emptyInboxDesc:
+    "新しく読み込んだファイルはまずここに入り、フォルダへ整理します",
   emptyTitle: "HTML ファイルをここにドロップ",
   emptyDesc: "自動で重複除去・サムネール・索引 — または右上の「読み込む」",
   searchPlaceholder: "アセット・フォルダを検索…",
@@ -526,7 +542,8 @@ const ja: Record<string, string> = {
   blockedN: "サンドボックスが外部リクエストを {n} 件ブロック · 今回のみ許可",
   allowedTemp: "外部リクエストを一時許可中 · クリックでサンドボックスに戻す",
   moveTitle: "「{name}」の移動先…",
-  moveHint: "移動 = ディスク上の実際の mv · 同名は自動サフィックス · ⌘Z で取り消し可",
+  moveHint:
+    "移動 = ディスク上の実際の mv · 同名は自動サフィックス · ⌘Z で取り消し可",
   newFolderIn: "（{name} 内）",
   folderNamePlaceholder: "フォルダ名",
   tagsTitle: "タグ · {name}",
@@ -544,7 +561,8 @@ const ja: Record<string, string> = {
   themeDark: "ダーク",
   themeSystem: "自動",
   aboutLine: "Harbly 0.1.0 · ローカルファーストの HTML アセット管理 · AGPL-3.0",
-  aboutLine2: "データはただのフォルダ：索引とサムネールはライブラリ内の .harbly/ に保存",
+  aboutLine2:
+    "データはただのフォルダ：索引とサムネールはライブラリ内の .harbly/ に保存",
   thumbsRebuilding: "サムネールをバックグラウンドで再生成中",
   switchedLibrary: "ライブラリを {name} に切り替えました",
   trashedOne: "ゴミ箱に入れました",
@@ -560,7 +578,8 @@ const ja: Record<string, string> = {
   movedNTo: "{n} 項目を {dest} へ移動しました",
   folderTrashed: "フォルダをゴミ箱に入れました",
   confirmDelFolderTitle: "フォルダを削除しますか？",
-  confirmDelFolderBody: "「{name}」は空ではありません。中身もまとめてゴミ箱に入ります。⌘Z でいつでも取り消せます。",
+  confirmDelFolderBody:
+    "「{name}」は空ではありません。中身もまとめてゴミ箱に入ります。⌘Z でいつでも取り消せます。",
   confirmDelete: "削除",
   folderDuplicated: "フォルダを複製しました",
   duplicatedAs: "「{name}」として複製しました",
@@ -600,7 +619,8 @@ const ja: Record<string, string> = {
   obNewLibDesc: "{path} に空のフォルダを作成 · iCloud やクラウドに置けば同期",
   obChangeLocation: "場所を変更…",
   obAdopt: "既存フォルダをライブラリにする",
-  obAdoptDesc: "HTML を溜めてきたフォルダを指定 — その場で引き継ぎ、ファイルは動かしません",
+  obAdoptDesc:
+    "HTML を溜めてきたフォルダを指定 — その場で引き継ぎ、ファイルは動かしません",
   obFootnote:
     "データは常にディスク上のプレーンなファイル：Finder で見え、git で管理でき、Harbly を削除しても残ります。アプリの索引はライブラリ内の隠しフォルダ .harbly/ に保存されます。",
   scanningTitle: "ライブラリをスキャン中",
@@ -614,7 +634,7 @@ const ja: Record<string, string> = {
   countUnit: "{n} 件",
 };
 
-const ko: Record<string, string> = {
+const ko: Dict = {
   open: "열기",
   openInBrowser: "브라우저에서 열기",
   revealInFinder: "Finder에서 보기",
@@ -653,7 +673,8 @@ const ko: Record<string, string> = {
   emptyInboxTitle: "수신함이 비었습니다",
   emptyInboxDesc: "새로 가져온 파일은 먼저 여기에 담긴 뒤 폴더로 정리됩니다",
   emptyTitle: "HTML 파일을 여기에 드롭",
-  emptyDesc: "자동 중복 제거 · 자동 스냅샷 · 자동 색인 — 또는 우측 상단 ‘가져오기’",
+  emptyDesc:
+    "자동 중복 제거 · 자동 스냅샷 · 자동 색인 — 또는 우측 상단 ‘가져오기’",
   searchPlaceholder: "에셋, 폴더 검색…",
   settings: "설정",
   rescanLibrary: "라이브러리 다시 스캔",
@@ -671,7 +692,8 @@ const ko: Record<string, string> = {
   blockedN: "샌드박스가 외부 요청 {n}건을 차단 · 이번만 허용",
   allowedTemp: "외부 요청 임시 허용 중 · 클릭하여 샌드박스 복원",
   moveTitle: "‘{name}’ 이동 위치…",
-  moveHint: "이동 = 디스크의 실제 mv · 같은 이름은 자동 접미사 · ⌘Z로 취소 가능",
+  moveHint:
+    "이동 = 디스크의 실제 mv · 같은 이름은 자동 접미사 · ⌘Z로 취소 가능",
   newFolderIn: " ({name} 안)",
   folderNamePlaceholder: "폴더 이름",
   tagsTitle: "태그 · {name}",
@@ -689,7 +711,8 @@ const ko: Record<string, string> = {
   themeDark: "다크",
   themeSystem: "자동",
   aboutLine: "Harbly 0.1.0 · 로컬 우선 HTML 에셋 관리자 · AGPL-3.0",
-  aboutLine2: "데이터는 그냥 폴더: 색인과 축소판은 라이브러리 안 .harbly/에 저장",
+  aboutLine2:
+    "데이터는 그냥 폴더: 색인과 축소판은 라이브러리 안 .harbly/에 저장",
   thumbsRebuilding: "축소판을 백그라운드에서 다시 생성 중",
   switchedLibrary: "라이브러리를 {name}(으)로 전환했습니다",
   trashedOne: "휴지통으로 이동했습니다",
@@ -697,15 +720,18 @@ const ko: Record<string, string> = {
   undoAction: "실행 취소 (⌘Z)",
   nothingToUndo: "실행 취소할 작업이 없습니다",
   nothingToRedo: "실행 복귀할 작업이 없습니다",
-  cannotUndo: "{label}을(를) 실행 취소할 수 없습니다 — 항목이 원래 위치에 없습니다",
-  cannotRedo: "{label}을(를) 실행 복귀할 수 없습니다 — 항목이 원래 위치에 없습니다",
+  cannotUndo:
+    "{label}을(를) 실행 취소할 수 없습니다 — 항목이 원래 위치에 없습니다",
+  cannotRedo:
+    "{label}을(를) 실행 복귀할 수 없습니다 — 항목이 원래 위치에 없습니다",
   undone: "{label} 실행 취소됨",
   redone: "{label} 실행 복귀됨",
   movedTo: "{dest}(으)로 이동했습니다",
   movedNTo: "{n}개 항목을 {dest}(으)로 이동했습니다",
   folderTrashed: "폴더를 휴지통으로 이동했습니다",
   confirmDelFolderTitle: "폴더를 삭제할까요?",
-  confirmDelFolderBody: "“{name}” 폴더는 비어 있지 않습니다. 내용물도 함께 휴지통으로 이동합니다. 언제든 ⌘Z로 되돌릴 수 있습니다.",
+  confirmDelFolderBody:
+    "“{name}” 폴더는 비어 있지 않습니다. 내용물도 함께 휴지통으로 이동합니다. 언제든 ⌘Z로 되돌릴 수 있습니다.",
   confirmDelete: "삭제",
   folderDuplicated: "폴더 사본을 생성했습니다",
   duplicatedAs: "‘{name}’(으)로 복제했습니다",
@@ -745,7 +771,8 @@ const ko: Record<string, string> = {
   obNewLibDesc: "{path}에 빈 폴더 생성 · iCloud / 클라우드에 두면 동기화",
   obChangeLocation: "위치 변경…",
   obAdopt: "기존 폴더를 라이브러리로",
-  obAdoptDesc: "HTML을 모아 둔 폴더를 지정 — 그 자리에서 인수하며 파일은 그대로",
+  obAdoptDesc:
+    "HTML을 모아 둔 폴더를 지정 — 그 자리에서 인수하며 파일은 그대로",
   obFootnote:
     "데이터는 언제나 디스크의 일반 파일입니다: Finder에서 보이고, git으로 관리되며, Harbly를 지워도 남습니다. 앱 색인은 라이브러리 안 숨김 폴더 .harbly/에 저장됩니다.",
   scanningTitle: "라이브러리 스캔 중",
@@ -759,7 +786,7 @@ const ko: Record<string, string> = {
   countUnit: "{n}개",
 };
 
-const es: Record<string, string> = {
+const es: Dict = {
   open: "Abrir",
   openInBrowser: "Abrir en el navegador",
   revealInFinder: "Mostrar en el Finder",
@@ -800,9 +827,11 @@ const es: Record<string, string> = {
   sortModified: "Fecha de modificación",
   sortName: "Nombre",
   emptyInboxTitle: "Bandeja vacía",
-  emptyInboxDesc: "Los archivos nuevos llegan aquí primero y luego se archivan en carpetas",
+  emptyInboxDesc:
+    "Los archivos nuevos llegan aquí primero y luego se archivan en carpetas",
   emptyTitle: "Suelta archivos HTML aquí",
-  emptyDesc: "Sin duplicados · miniaturas · índice automático — o pulsa Importar",
+  emptyDesc:
+    "Sin duplicados · miniaturas · índice automático — o pulsa Importar",
   searchPlaceholder: "Buscar recursos, carpetas…",
   settings: "Ajustes",
   rescanLibrary: "Reescanear biblioteca",
@@ -818,9 +847,11 @@ const es: Record<string, string> = {
   scanMoved: "{n} movidos",
   scanRemoved: "{n} limpiados",
   blockedN: "El sandbox bloqueó {n} peticiones externas · Permitir esta vez",
-  allowedTemp: "Peticiones externas permitidas temporalmente · Clic para restaurar el sandbox",
+  allowedTemp:
+    "Peticiones externas permitidas temporalmente · Clic para restaurar el sandbox",
   moveTitle: "Trasladar «{name}» a…",
-  moveHint: "Trasladar = un mv real en disco · sufijo automático si coincide el nombre · reversible con ⌘Z",
+  moveHint:
+    "Trasladar = un mv real en disco · sufijo automático si coincide el nombre · reversible con ⌘Z",
   newFolderIn: " (dentro de {name})",
   folderNamePlaceholder: "Nombre de la carpeta",
   tagsTitle: "Etiquetas · {name}",
@@ -838,7 +869,8 @@ const es: Record<string, string> = {
   themeDark: "Oscuro",
   themeSystem: "Automático",
   aboutLine: "Harbly 0.1.0 · gestor local-first de recursos HTML · AGPL-3.0",
-  aboutLine2: "Tus datos son una carpeta: el índice y las miniaturas viven en .harbly/ dentro de la biblioteca",
+  aboutLine2:
+    "Tus datos son una carpeta: el índice y las miniaturas viven en .harbly/ dentro de la biblioteca",
   thumbsRebuilding: "Regenerando miniaturas en segundo plano",
   switchedLibrary: "Biblioteca cambiada a {name}",
   trashedOne: "Trasladado a la papelera",
@@ -855,7 +887,8 @@ const es: Record<string, string> = {
   movedNToOne: "{n} ítem trasladado a {dest}",
   folderTrashed: "Carpeta trasladada a la papelera",
   confirmDelFolderTitle: "¿Eliminar la carpeta?",
-  confirmDelFolderBody: "“{name}” no está vacía: su contenido también se moverá a la papelera. Puedes deshacerlo en cualquier momento con ⌘Z.",
+  confirmDelFolderBody:
+    "“{name}” no está vacía: su contenido también se moverá a la papelera. Puedes deshacerlo en cualquier momento con ⌘Z.",
   confirmDelete: "Eliminar",
   folderDuplicated: "Carpeta duplicada",
   duplicatedAs: "Duplicado como «{name}»",
@@ -896,10 +929,12 @@ const es: Record<string, string> = {
   obStep0: "Elige un hogar para tus recursos HTML — una carpeta local normal",
   obStep1: "Creando índice y miniaturas — solo lectura, no se modifica nada",
   obNewLib: "Crear una biblioteca nueva",
-  obNewLibDesc: "Crea una carpeta vacía en {path} · ponla en iCloud o tu nube para sincronizar",
+  obNewLibDesc:
+    "Crea una carpeta vacía en {path} · ponla en iCloud o tu nube para sincronizar",
   obChangeLocation: "Cambiar ubicación…",
   obAdopt: "Convertir una carpeta existente en biblioteca",
-  obAdoptDesc: "Apunta a la carpeta donde ya guardas HTML — se adopta en el sitio, sin tocar archivos",
+  obAdoptDesc:
+    "Apunta a la carpeta donde ya guardas HTML — se adopta en el sitio, sin tocar archivos",
   obFootnote:
     "Tus datos siempre son archivos planos en disco: visibles en el Finder, gestionables con git, tuyos aunque desinstales Harbly. El índice vive en la carpeta oculta .harbly/ dentro de la biblioteca.",
   scanningTitle: "Escaneando la biblioteca",
@@ -909,11 +944,12 @@ const es: Record<string, string> = {
   thumbsBg: "generando en segundo plano",
   thumbsWaiting: "en espera",
   enterApp: "Entrar en Harbly →",
-  scanContinuesBg: "Puedes entrar cuando quieras — el escaneo continúa en segundo plano",
+  scanContinuesBg:
+    "Puedes entrar cuando quieras — el escaneo continúa en segundo plano",
   countUnit: "{n}",
 };
 
-const DICTS: Record<Lang, Record<string, string>> = {
+const DICTS: Record<Lang, Dict> = {
   "zh-CN": zhCN,
   "zh-TW": zhTW,
   en,
@@ -923,7 +959,7 @@ const DICTS: Record<Lang, Record<string, string>> = {
 };
 
 /** Backend error strings (Chinese as canonical keys) → each language. Exact match only; unmatched strings display as-is. */
-const ERRORS: Record<Lang, Record<string, string>> = {
+const ERRORS: Record<Lang, Dict> = {
   "zh-CN": {},
   "zh-TW": {
     尚未选择库: "尚未選擇資料庫",
@@ -992,10 +1028,13 @@ const ERRORS: Record<Lang, Record<string, string>> = {
   },
 };
 
-export type TFn = (key: string, params?: Record<string, string | number>) => string;
+export type TFn = (
+  key: string,
+  params?: Record<string, string | number>,
+) => string;
 
 export function makeT(lang: Lang): TFn {
-  const d = DICTS[lang] ?? zhCN;
+  const d = DICTS[lang];
   return (key, params) => {
     let s: string | undefined;
     const n = params?.n;
@@ -1026,14 +1065,16 @@ export const tr: TFn = (key, params) => makeT(current)(key, params);
 
 /** Localize backend error strings: exact-match known messages, return unknown ones as-is */
 export function localizeError(msg: string): string {
-  return ERRORS[current]?.[msg] ?? msg;
+  return ERRORS[current][msg] ?? msg;
 }
 
 /** Guess from the system language on first launch */
 export function detectLang(): Lang {
   const nav = (navigator.language || "en").toLowerCase();
   if (nav.startsWith("zh")) {
-    return nav.includes("tw") || nav.includes("hk") || nav.includes("hant") ? "zh-TW" : "zh-CN";
+    return nav.includes("tw") || nav.includes("hk") || nav.includes("hant")
+      ? "zh-TW"
+      : "zh-CN";
   }
   if (nav.startsWith("ja")) return "ja";
   if (nav.startsWith("ko")) return "ko";
@@ -1042,7 +1083,7 @@ export function detectLang(): Lang {
 }
 
 export function initialLang(): Lang {
-  const saved = localStorage.getItem("harbly.lang") as Lang | null;
-  if (saved && DICTS[saved]) return saved;
+  const saved = localStorage.getItem("harbly.lang");
+  if (saved && isLang(saved)) return saved;
   return detectLang();
 }

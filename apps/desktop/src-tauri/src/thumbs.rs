@@ -90,7 +90,8 @@ fn render_thumb(app: &AppHandle, url: &str) -> Option<Vec<u8>> {
                 let tiff = im.TIFFRepresentation()?;
                 let rep = NSBitmapImageRep::imageRepWithData(&tiff)?;
                 let props = NSDictionary::new();
-                let data = rep.representationUsingType_properties(NSBitmapImageFileType::JPEG, &props)?;
+                let data =
+                    rep.representationUsingType_properties(NSBitmapImageFileType::JPEG, &props)?;
                 Some(data.to_vec())
             });
             let _ = ttx.send(out);
@@ -113,12 +114,13 @@ fn ensure_window(app: &AppHandle, url: &str) -> Option<tauri::WebviewWindow> {
         }
         let _ = w.close();
     }
-    let w = tauri::WebviewWindowBuilder::new(app, THUMB_WINDOW, tauri::WebviewUrl::External(parsed))
-        .visible(false)
-        .focused(false)
-        .inner_size(1160.0, 760.0)
-        .build()
-        .ok()?;
+    let w =
+        tauri::WebviewWindowBuilder::new(app, THUMB_WINDOW, tauri::WebviewUrl::External(parsed))
+            .visible(false)
+            .focused(false)
+            .inner_size(1160.0, 760.0)
+            .build()
+            .ok()?;
     Some(w)
 }
 

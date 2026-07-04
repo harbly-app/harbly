@@ -8,11 +8,27 @@
     "dev:landing": "pnpm --filter @harbly/landing dev",
     "build:landing": "pnpm --filter @harbly/landing build",
     "test:core": "cargo test -p harbly-core",
+    "format": "prettier --write --cache --ignore-path .prettierignore . && cargo fmt --all",
+    "format:check": "prettier --check --cache --ignore-path .prettierignore . && cargo fmt --all --check",
+    "lint": "eslint --cache --cache-location node_modules/.cache/eslint/ --max-warnings 0 . && cargo clippy --workspace --all-targets -- -D warnings",
+    "lint:fix": "eslint --cache --cache-location node_modules/.cache/eslint/ --fix . && cargo clippy --workspace --all-targets --fix --allow-dirty --allow-staged -- -D warnings",
     "prepare": "husky"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.0",
     "@commitlint/config-conventional": "^21.2.0",
-    "husky": "^9.1.7"
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.6.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-astro": "^2.1.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.7.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.8",
+    "prettier": "^3.9.4",
+    "prettier-plugin-astro": "^0.14.1",
+    "prettier-plugin-tailwindcss": "^0.8.0",
+    "typescript-eslint": "^8.62.1"
   }
 }

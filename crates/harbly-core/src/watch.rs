@@ -17,30 +17,27 @@ pub fn watch_library(
     watcher.watch(root, RecursiveMode::Recursive)?;
 
     let root = root.to_path_buf();
-    std::thread::spawn(move || loop {
-        match rx.recv() {
-            Ok(ev) => {
-                let relevant = match &ev {
-                    Ok(e) => e.paths.iter().any(|p| is_relevant(&root, p)),
-                    Err(_) => false,
-                };
-                if !relevant {
-                    continue;
-                }
-                // Debounce: consecutive events within a short window coalesce into a single callback
-                let deadline = Instant::now() + Duration::from_millis(700);
-                loop {
-                    let left = deadline.saturating_duration_since(Instant::now());
-                    if left.is_zero() {
-                        break;
-                    }
-                    if rx.recv_timeout(left).is_err() {
-                        break;
-                    }
-                }
-                on_change();
+    std::thread::spawn(move || {
+        while let Ok(ev) = rx.recv() {
+            let relevant = match &ev {
+                Ok(e) => e.paths.iter().any(|p| is_relevant(&root, p)),
+                Err(_) => false,
+            };
+            if !relevant {
+                continue;
             }
-            Err(_) => break,
+            // Debounce: consecutive events within a short window coalesce into a single callback
+            let deadline = Instant::now() + Duration::from_millis(700);
+            loop {
+                let left = deadline.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    break;
+                }
+                if rx.recv_timeout(left).is_err() {
+                    break;
+                }
+            }
+            on_change();
         }
     });
     Ok(watcher)

@@ -19,7 +19,8 @@
           var p = localStorage.getItem("harbly.theme");
           var dark =
             p === "dark" ||
-            (p !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+            (p !== "light" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
           if (dark) document.documentElement.classList.add("dark");
         } catch (_) {}
       })();

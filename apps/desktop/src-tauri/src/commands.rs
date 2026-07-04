@@ -43,8 +43,13 @@ fn save_library(app: &AppHandle, root: &std::path::Path) {
 }
 
 pub fn saved_lang(app: &AppHandle) -> String {
-    crate::i18n::normalize(read_config(app).get("lang").and_then(|v| v.as_str()).unwrap_or("zh-CN"))
-        .to_string()
+    crate::i18n::normalize(
+        read_config(app)
+            .get("lang")
+            .and_then(|v| v.as_str())
+            .unwrap_or("zh-CN"),
+    )
+    .to_string()
 }
 
 pub(crate) fn cur_lang(app: &AppHandle) -> String {
@@ -223,7 +228,10 @@ pub async fn rescan(app: AppHandle) -> Result<harbly_core::ScanSummary, String> 
 
 #[tauri::command]
 pub async fn dir_tree(app: AppHandle) -> Result<harbly_core::TreeNode, String> {
-    app.state::<AppState>().lib()?.dir_tree().map_err(|e| e.to_string())
+    app.state::<AppState>()
+        .lib()?
+        .dir_tree()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -240,16 +248,26 @@ pub async fn list_assets(
 
 #[tauri::command]
 pub async fn asset_get(app: AppHandle, id: String) -> Result<harbly_core::AssetMeta, String> {
-    app.state::<AppState>().lib()?.asset(&id).map_err(|e| e.to_string())
+    app.state::<AppState>()
+        .lib()?
+        .asset(&id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn inbox_count(app: AppHandle) -> Result<i64, String> {
-    app.state::<AppState>().lib()?.inbox_count().map_err(|e| e.to_string())
+    app.state::<AppState>()
+        .lib()?
+        .inbox_count()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn import_paths(app: AppHandle, paths: Vec<String>, dest: String) -> Result<harbly_core::ImportResult, String> {
+pub async fn import_paths(
+    app: AppHandle,
+    paths: Vec<String>,
+    dest: String,
+) -> Result<harbly_core::ImportResult, String> {
     let lib = app.state::<AppState>().lib()?;
     let lib2 = lib.clone();
     let pbs: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
@@ -260,13 +278,21 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>, dest: String) -> R
     if !res.imported.is_empty() {
         let t = crate::i18n::l(&cur_lang(&app));
         let label = if res.imported.len() == 1 {
-            crate::i18n::tpl(t.op_import_one, res.imported[0].rsplit('/').next().unwrap_or(&res.imported[0]))
+            crate::i18n::tpl(
+                t.op_import_one,
+                res.imported[0]
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&res.imported[0]),
+            )
         } else {
             crate::i18n::tpl(t.op_import_n, &res.imported.len().to_string())
         };
         record_op(
             &app,
-            FileOp::Created { paths: res.imported.iter().map(|r| lib.abs(r)).collect() },
+            FileOp::Created {
+                paths: res.imported.iter().map(|r| lib.abs(r)).collect(),
+            },
             label,
         );
     }
@@ -276,7 +302,10 @@ pub async fn import_paths(app: AppHandle, paths: Vec<String>, dest: String) -> R
 }
 
 #[tauri::command]
-pub async fn pick_and_import(app: AppHandle, dest: String) -> Result<harbly_core::ImportResult, String> {
+pub async fn pick_and_import(
+    app: AppHandle,
+    dest: String,
+) -> Result<harbly_core::ImportResult, String> {
     let app2 = app.clone();
     let files: Vec<String> = tauri::async_runtime::spawn_blocking(move || {
         app2.dialog()
@@ -298,21 +327,35 @@ pub async fn pick_and_import(app: AppHandle, dest: String) -> Result<harbly_core
 }
 
 #[tauri::command]
-pub async fn search_assets(app: AppHandle, q: String) -> Result<Vec<harbly_core::SearchHit>, String> {
-    app.state::<AppState>().lib()?.search(&q).map_err(|e| e.to_string())
+pub async fn search_assets(
+    app: AppHandle,
+    q: String,
+) -> Result<Vec<harbly_core::SearchHit>, String> {
+    app.state::<AppState>()
+        .lib()?
+        .search(&q)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn asset_rename(app: AppHandle, id: String, new_name: String) -> Result<harbly_core::AssetMeta, String> {
+pub async fn asset_rename(
+    app: AppHandle,
+    id: String,
+    new_name: String,
+) -> Result<harbly_core::AssetMeta, String> {
     let lib = app.state::<AppState>().lib()?;
     let cur = lib.asset(&id).map_err(|e| e.to_string())?;
     let old_abs = lib.abs(&cur.rel_path);
-    let r = lib.rename_asset(&id, &new_name).map_err(|e| e.to_string())?;
+    let r = lib
+        .rename_asset(&id, &new_name)
+        .map_err(|e| e.to_string())?;
     if r.rel_path != cur.rel_path {
         let t = crate::i18n::l(&cur_lang(&app));
         record_op(
             &app,
-            FileOp::Moved { moves: vec![(old_abs, lib.abs(&r.rel_path))] },
+            FileOp::Moved {
+                moves: vec![(old_abs, lib.abs(&r.rel_path))],
+            },
             crate::i18n::tpl(t.op_rename_one, &cur.file_name),
         );
     }
@@ -367,7 +410,10 @@ pub(crate) fn record_op(app: &AppHandle, op: FileOp, label: impl Into<String>) {
     let state = app.state::<AppState>();
     {
         let mut s = state.undo_stack.lock().unwrap();
-        s.push(OpEntry { op, label: label.into() });
+        s.push(OpEntry {
+            op,
+            label: label.into(),
+        });
         if s.len() > UNDO_CAP {
             let overflow = s.len() - UNDO_CAP;
             s.drain(0..overflow);
@@ -383,15 +429,27 @@ pub(crate) fn record_op(app: &AppHandle, op: FileOp, label: impl Into<String>) {
 /// routes ⌘Z to text undo instead.
 fn sync_undo_menu(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let u = state.undo_stack.lock().unwrap().last().map(|e| e.label.clone());
-    let r = state.redo_stack.lock().unwrap().last().map(|e| e.label.clone());
+    let u = state
+        .undo_stack
+        .lock()
+        .unwrap()
+        .last()
+        .map(|e| e.label.clone());
+    let r = state
+        .redo_stack
+        .lock()
+        .unwrap()
+        .last()
+        .map(|e| e.label.clone());
     let t = crate::i18n::l(&cur_lang(app));
     let app2 = app.clone();
     let _ = app.run_on_main_thread(move || {
         let Some(menu) = app2.menu() else { return };
         let Ok(items) = menu.items() else { return };
         for kind in items {
-            let Some(sub) = kind.as_submenu() else { continue };
+            let Some(sub) = kind.as_submenu() else {
+                continue;
+            };
             if let Some(item) = sub.get("undo").and_then(|k| k.as_menuitem().cloned()) {
                 let _ = item.set_text(
                     u.as_ref()
@@ -418,7 +476,11 @@ fn move_back(lib: &Library, from: &Path, to: &Path) -> Option<PathBuf> {
     }
     let mut dest = to.to_path_buf();
     if dest.exists() {
-        let rel = dest.strip_prefix(lib.root()).ok()?.to_str()?.replace('\\', "/");
+        let rel = dest
+            .strip_prefix(lib.root())
+            .ok()?
+            .to_str()?
+            .replace('\\', "/");
         dest = lib.abs(&lib.unique_rel(&rel));
     }
     if let Some(parent) = dest.parent() {
@@ -444,7 +506,10 @@ fn execute_entry(lib: &Library, entry: OpEntry) -> (Option<OpEntry>, usize) {
             }
             let n = created.len();
             (
-                (n > 0).then_some(OpEntry { op: FileOp::Created { paths: created }, label }),
+                (n > 0).then_some(OpEntry {
+                    op: FileOp::Created { paths: created },
+                    label,
+                }),
                 n,
             )
         }
@@ -458,7 +523,10 @@ fn execute_entry(lib: &Library, entry: OpEntry) -> (Option<OpEntry>, usize) {
             }
             let n = inv.len();
             (
-                (n > 0).then_some(OpEntry { op: FileOp::Moved { moves: inv }, label }),
+                (n > 0).then_some(OpEntry {
+                    op: FileOp::Moved { moves: inv },
+                    label,
+                }),
                 n,
             )
         }
@@ -474,7 +542,10 @@ fn execute_entry(lib: &Library, entry: OpEntry) -> (Option<OpEntry>, usize) {
             }
             let n = trashed.len();
             (
-                (n > 0).then_some(OpEntry { op: FileOp::Trashed { moves: trashed }, label }),
+                (n > 0).then_some(OpEntry {
+                    op: FileOp::Trashed { moves: trashed },
+                    label,
+                }),
                 n,
             )
         }
@@ -510,7 +581,11 @@ async fn shift_stack(app: AppHandle, redo: bool) -> Result<Option<UndoResult>, S
     .map_err(|e| e.to_string())?;
     if let Some(inv) = inverse {
         let state = app.state::<AppState>();
-        let target = if redo { &state.undo_stack } else { &state.redo_stack };
+        let target = if redo {
+            &state.undo_stack
+        } else {
+            &state.redo_stack
+        };
         target.lock().unwrap().push(inv);
     }
     sync_undo_menu(&app);
@@ -615,23 +690,39 @@ pub async fn open_in_browser(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn reveal_folder(app: AppHandle, rel: String) -> Result<(), String> {
     let lib = app.state::<AppState>().lib()?;
-    let p = if rel.is_empty() { lib.root().to_path_buf() } else { lib.abs(&rel) };
+    let p = if rel.is_empty() {
+        lib.root().to_path_buf()
+    } else {
+        lib.abs(&rel)
+    };
     open_with_system(&p, false)
 }
 
 #[tauri::command]
 pub async fn create_folder(app: AppHandle, parent: String, name: String) -> Result<String, String> {
     let lib = app.state::<AppState>().lib()?;
-    let rel = lib.create_folder(&parent, &name).map_err(|e| e.to_string())?;
+    let rel = lib
+        .create_folder(&parent, &name)
+        .map_err(|e| e.to_string())?;
     let short = rel.rsplit('/').next().unwrap_or(&rel).to_string();
     let t = crate::i18n::l(&cur_lang(&app));
-    record_op(&app, FileOp::Created { paths: vec![lib.abs(&rel)] }, crate::i18n::tpl(t.op_new_folder, &short));
+    record_op(
+        &app,
+        FileOp::Created {
+            paths: vec![lib.abs(&rel)],
+        },
+        crate::i18n::tpl(t.op_new_folder, &short),
+    );
     let _ = app.emit("library-changed", ());
     Ok(rel)
 }
 
 #[tauri::command]
-pub async fn folder_rename(app: AppHandle, rel: String, new_name: String) -> Result<String, String> {
+pub async fn folder_rename(
+    app: AppHandle,
+    rel: String,
+    new_name: String,
+) -> Result<String, String> {
     let lib = app.state::<AppState>().lib()?;
     let old_abs = lib.abs(&rel);
     let old_name = rel.rsplit('/').next().unwrap_or(&rel).to_string();
@@ -645,7 +736,9 @@ pub async fn folder_rename(app: AppHandle, rel: String, new_name: String) -> Res
         let t = crate::i18n::l(&cur_lang(&app));
         record_op(
             &app,
-            FileOp::Moved { moves: vec![(old_abs, lib.abs(&r))] },
+            FileOp::Moved {
+                moves: vec![(old_abs, lib.abs(&r))],
+            },
             crate::i18n::tpl(t.op_rename_folder, &old_name),
         );
     }
@@ -674,7 +767,13 @@ pub async fn folder_delete(app: AppHandle, rel: String) -> Result<bool, String> 
             Ok(trashed) => {
                 lib.scan(|_| {}).map_err(|e| e.to_string())?;
                 let t = crate::i18n::l(&cur_lang(&app2));
-                record_op(&app2, FileOp::Trashed { moves: vec![(trashed, abs)] }, crate::i18n::tpl(t.op_delete_folder, &name));
+                record_op(
+                    &app2,
+                    FileOp::Trashed {
+                        moves: vec![(trashed, abs)],
+                    },
+                    crate::i18n::tpl(t.op_delete_folder, &name),
+                );
                 Ok(true)
             }
             Err(_) => {
@@ -685,9 +784,8 @@ pub async fn folder_delete(app: AppHandle, rel: String) -> Result<bool, String> 
     })
     .await
     .map_err(|e| e.to_string())?
-    .map(|ok| {
+    .inspect(|_| {
         let _ = app.emit("library-changed", ());
-        ok
     })
 }
 
@@ -715,7 +813,13 @@ pub async fn folder_duplicate(app: AppHandle, rel: String) -> Result<String, Str
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
     let t = crate::i18n::l(&cur_lang(&app));
-    record_op(&app, FileOp::Created { paths: vec![lib.abs(&r)] }, crate::i18n::tpl(t.op_dup_folder, &src_name));
+    record_op(
+        &app,
+        FileOp::Created {
+            paths: vec![lib.abs(&r)],
+        },
+        crate::i18n::tpl(t.op_dup_folder, &src_name),
+    );
     enqueue_missing_thumbs(&app);
     let _ = app.emit("library-changed", ());
     Ok(r)
@@ -730,15 +834,27 @@ pub async fn asset_duplicate(app: AppHandle, id: String) -> Result<harbly_core::
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
     let t = crate::i18n::l(&cur_lang(&app));
-    record_op(&app, FileOp::Created { paths: vec![lib.abs(&r.rel_path)] }, crate::i18n::tpl(t.op_dup_one, &r.file_name));
+    record_op(
+        &app,
+        FileOp::Created {
+            paths: vec![lib.abs(&r.rel_path)],
+        },
+        crate::i18n::tpl(t.op_dup_one, &r.file_name),
+    );
     enqueue_missing_thumbs(&app);
     let _ = app.emit("library-changed", ());
     Ok(r)
 }
 
 #[tauri::command]
-pub async fn list_versions(app: AppHandle, id: String) -> Result<Vec<harbly_core::VersionInfo>, String> {
-    app.state::<AppState>().lib()?.list_versions(&id).map_err(|e| e.to_string())
+pub async fn list_versions(
+    app: AppHandle,
+    id: String,
+) -> Result<Vec<harbly_core::VersionInfo>, String> {
+    app.state::<AppState>()
+        .lib()?
+        .list_versions(&id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -764,11 +880,17 @@ pub async fn set_tags(app: AppHandle, id: String, tags: Vec<String>) -> Result<(
 
 #[tauri::command]
 pub async fn all_tags(app: AppHandle) -> Result<Vec<harbly_core::TagInfo>, String> {
-    app.state::<AppState>().lib()?.all_tags().map_err(|e| e.to_string())
+    app.state::<AppState>()
+        .lib()?
+        .all_tags()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn assets_by_tag(app: AppHandle, tag: String) -> Result<Vec<harbly_core::AssetMeta>, String> {
+pub async fn assets_by_tag(
+    app: AppHandle,
+    tag: String,
+) -> Result<Vec<harbly_core::AssetMeta>, String> {
     app.state::<AppState>()
         .lib()?
         .assets_by_tag(&tag)
@@ -826,7 +948,7 @@ pub async fn export_folder(app: AppHandle, rel: String) -> Result<Option<String>
         let dest = app2
             .dialog()
             .file()
-            .set_file_name(&format!("{name}.zip"))
+            .set_file_name(format!("{name}.zip"))
             .blocking_save_file()
             .and_then(|f| f.into_path().ok());
         match dest {
@@ -878,7 +1000,10 @@ pub async fn request_thumbs(app: AppHandle, ids: Vec<String>) -> Result<(), Stri
 // ---------- System clipboard: file copy/paste (interoperates with Finder) ----------
 
 /// Run on the main thread and fetch the result back (NSPasteboard/NSApplication require the main thread)
-fn on_main<T: Send + 'static>(app: &AppHandle, f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+fn on_main<T: Send + 'static>(
+    app: &AppHandle,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, String> {
     let (tx, rx) = std::sync::mpsc::channel();
     app.run_on_main_thread(move || {
         let _ = tx.send(f());
@@ -916,7 +1041,11 @@ pub struct PasteOutcome {
 /// In-library source + ⌥⌘V = a real move; everything else = copy
 /// (HTML files and folders; tag xattrs travel along).
 #[tauri::command]
-pub async fn pasteboard_paste(app: AppHandle, dest: String, move_items: bool) -> Result<PasteOutcome, String> {
+pub async fn pasteboard_paste(
+    app: AppHandle,
+    dest: String,
+    move_items: bool,
+) -> Result<PasteOutcome, String> {
     let lib = app.state::<AppState>().lib()?;
     let srcs: Vec<PathBuf> = on_main(&app, crate::pasteboard::read_file_paths)?
         .into_iter()
@@ -927,7 +1056,11 @@ pub async fn pasteboard_paste(app: AppHandle, dest: String, move_items: bool) ->
     }
     let app2 = app.clone();
     let out = tauri::async_runtime::spawn_blocking(move || -> Result<PasteOutcome, String> {
-        let dest_dir = if dest.is_empty() { lib.root().to_path_buf() } else { lib.abs(&dest) };
+        let dest_dir = if dest.is_empty() {
+            lib.root().to_path_buf()
+        } else {
+            lib.abs(&dest)
+        };
         std::fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
         let mut moved: Vec<(PathBuf, PathBuf)> = vec![];
         let mut created: Vec<PathBuf> = vec![];
@@ -944,12 +1077,18 @@ pub async fn pasteboard_paste(app: AppHandle, dest: String, move_items: bool) ->
             if is_dir && dest_dir.starts_with(src) {
                 continue; // A folder cannot be pasted into itself
             }
-            let Some(name) = src.file_name().and_then(|n| n.to_str()) else { continue };
+            let Some(name) = src.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
             let in_lib = src.starts_with(lib.root());
             if move_items && in_lib && src.parent() == Some(dest_dir.as_path()) {
                 continue; // Moving in place = no-op
             }
-            let rel = if dest.is_empty() { name.to_string() } else { format!("{dest}/{name}") };
+            let rel = if dest.is_empty() {
+                name.to_string()
+            } else {
+                format!("{dest}/{name}")
+            };
             let target = lib.abs(&lib.unique_rel(&rel));
             if move_items && in_lib {
                 if std::fs::rename(src, &target).is_ok() {
@@ -970,14 +1109,18 @@ pub async fn pasteboard_paste(app: AppHandle, dest: String, move_items: bool) ->
         if !moved.is_empty() {
             record_op(
                 &app2,
-                FileOp::Moved { moves: moved.clone() },
+                FileOp::Moved {
+                    moves: moved.clone(),
+                },
                 crate::i18n::tpl(t.op_move_n, &moved.len().to_string()),
             );
         }
         if !created.is_empty() {
             record_op(
                 &app2,
-                FileOp::Created { paths: created.clone() },
+                FileOp::Created {
+                    paths: created.clone(),
+                },
                 crate::i18n::tpl(t.op_paste_n, &created.len().to_string()),
             );
         }
@@ -1000,7 +1143,9 @@ pub async fn pasteboard_paste(app: AppHandle, dest: String, move_items: bool) ->
 /// through the system responder chain (same mechanism as the predefined items)
 #[tauri::command]
 pub async fn forward_edit_action(app: AppHandle, action: String) -> Result<(), String> {
-    on_main(&app, move || crate::pasteboard::forward_responder_action(&action))?
+    on_main(&app, move || {
+        crate::pasteboard::forward_responder_action(&action)
+    })?
 }
 
 fn open_with_system(path: &std::path::Path, reveal: bool) -> Result<(), String> {

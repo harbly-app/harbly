@@ -1,10 +1,19 @@
-import { ChevronLeft, ExternalLink, FolderOpen, PanelLeft, Plus, RefreshCw, Search, Settings } from "lucide-react";
+import {
+  ChevronLeft,
+  ExternalLink,
+  FolderOpen,
+  PanelLeft,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings,
+} from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import { INBOX } from "../lib/types";
-import { windowDrag } from "./menu";
+import { windowDrag } from "../lib/drag";
 
 export default function TitleBar() {
   const setPalette = useStore((s) => s.setPalette);
@@ -28,7 +37,9 @@ export default function TitleBar() {
       if (s.updated) parts.push(t("scanUpdated", { n: s.updated }));
       if (s.moved) parts.push(t("scanMoved", { n: s.moved }));
       if (s.removed) parts.push(t("scanRemoved", { n: s.removed }));
-      showToast(`${t("scanDone")} · ${parts.length ? parts.join(" · ") : t("scanNoChange")}`);
+      showToast(
+        `${t("scanDone")} · ${parts.length ? parts.join(" · ") : t("scanNoChange")}`,
+      );
     } catch (e) {
       showToast(String(e));
     } finally {
@@ -44,25 +55,27 @@ export default function TitleBar() {
   };
 
   return (
-    <header className="relative h-[52px] shrink-0 flex items-center gap-3 border-b border-line bg-paper pl-[78px] pr-4">
+    <header className="relative flex h-[52px] shrink-0 items-center gap-3 border-b border-line bg-paper pr-4 pl-[78px]">
       {/* Full-size transparent drag layer: calls startDragging explicitly; interactive controls sit above it via z-[1]; double-click maximizes */}
       <div className="absolute inset-0" onMouseDown={windowDrag} />
 
-      <div className="flex items-center gap-2 pointer-events-none relative">
-        <div className="w-7 h-7 rounded-[9px] bg-primary text-white grid place-items-center text-[11px] font-extrabold">
+      <div className="pointer-events-none relative flex items-center gap-2">
+        <div className="grid h-7 w-7 place-items-center rounded-[9px] bg-primary text-[11px] font-extrabold text-white">
           {"</>"}
         </div>
-        <span className="font-extrabold text-[14px]">Harbly</span>
+        <span className="text-[14px] font-extrabold">Harbly</span>
       </div>
 
       <button
         onClick={toggleSidebar}
         title={`${sidebarOpen ? t("sidebarHide") : t("sidebarShow")} (⌘B)`}
-        className={`relative z-[1] w-8 h-8 grid place-items-center rounded-ctl transition ${
-          sidebarOpen ? "text-sub hover:bg-side hover:text-ink" : "text-primary bg-primary/10"
+        className={`relative z-[1] grid h-8 w-8 place-items-center rounded-ctl transition ${
+          sidebarOpen
+            ? "text-sub hover:bg-side hover:text-ink"
+            : "bg-primary/10 text-primary"
         }`}
       >
-        <PanelLeft className="w-4 h-4" />
+        <PanelLeft className="h-4 w-4" />
       </button>
 
       {viewer ? (
@@ -70,19 +83,24 @@ export default function TitleBar() {
           <button
             onClick={() => useStore.getState().closeViewer()}
             title={`${t("back")} (esc)`}
-            className="relative z-[1] w-8 h-8 grid place-items-center rounded-ctl text-sub hover:bg-side hover:text-ink transition"
+            className="relative z-[1] grid h-8 w-8 place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className="h-4 w-4" />
           </button>
-          <div className="relative z-[1] ml-1 min-w-0 flex-1 max-w-[520px] flex items-baseline gap-1.5">
+          <div className="relative z-[1] ml-1 flex max-w-[520px] min-w-0 flex-1 items-baseline gap-1.5">
             <button
               onClick={backToFolder}
-              className="text-xs text-sub truncate shrink-0 hover:text-primary transition"
+              className="shrink-0 truncate text-xs text-sub transition hover:text-primary"
               title={t("backToFolder")}
             >
-              {viewer.folder === INBOX ? t("inbox") : viewer.folder || t("libraryRoot")} /
+              {viewer.folder === INBOX
+                ? t("inbox")
+                : viewer.folder || t("libraryRoot")}{" "}
+              /
             </button>
-            <span className="text-[13.5px] font-extrabold truncate">{viewer.fileName}</span>
+            <span className="truncate text-[13.5px] font-extrabold">
+              {viewer.fileName}
+            </span>
           </div>
 
           <div className="flex-1" />
@@ -90,27 +108,29 @@ export default function TitleBar() {
           <button
             onClick={() => api.openInBrowser(viewer.id).catch(() => {})}
             title={t("openInBrowser")}
-            className="relative z-[1] w-8 h-8 grid place-items-center rounded-ctl text-sub hover:bg-side hover:text-ink transition"
+            className="relative z-[1] grid h-8 w-8 place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
           >
-            <ExternalLink className="w-4 h-4" />
+            <ExternalLink className="h-4 w-4" />
           </button>
           <button
             onClick={() => api.revealAsset(viewer.id).catch(() => {})}
             title={t("revealInFinder")}
-            className="relative z-[1] w-8 h-8 grid place-items-center rounded-ctl text-sub hover:bg-side hover:text-ink transition"
+            className="relative z-[1] grid h-8 w-8 place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
           >
-            <FolderOpen className="w-4 h-4" />
+            <FolderOpen className="h-4 w-4" />
           </button>
         </>
       ) : (
         <>
           <button
             onClick={() => setPalette(true)}
-            className="relative z-[1] ml-4 flex-1 max-w-[420px] h-8 flex items-center gap-2 px-3 rounded-full bg-side border border-line text-sub text-xs hover:border-primary/40 transition"
+            className="relative z-[1] ml-4 flex h-8 max-w-[420px] flex-1 items-center gap-2 rounded-full border border-line bg-side px-3 text-xs text-sub transition hover:border-primary/40"
           >
-            <Search className="w-3.5 h-3.5" />
+            <Search className="h-3.5 w-3.5" />
             <span className="flex-1 text-left">{t("searchPlaceholder")}</span>
-            <kbd className="text-[10px] bg-card border border-line rounded px-1.5 py-0.5">⌘K</kbd>
+            <kbd className="rounded border border-line bg-card px-1.5 py-0.5 text-[10px]">
+              ⌘K
+            </kbd>
           </button>
 
           <div className="flex-1" />
@@ -118,24 +138,26 @@ export default function TitleBar() {
           <button
             onClick={() => useStore.getState().setModal({ kind: "settings" })}
             title={`${t("settings")} (⌘,)`}
-            className="relative z-[1] w-8 h-8 grid place-items-center rounded-ctl text-sub hover:bg-side hover:text-ink transition"
+            className="relative z-[1] grid h-8 w-8 place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
           >
-            <Settings className="w-4 h-4" />
+            <Settings className="h-4 w-4" />
           </button>
 
           <button
             onClick={rescan}
             title={t("rescanLibrary")}
-            className="relative z-[1] w-8 h-8 grid place-items-center rounded-ctl text-sub hover:bg-side hover:text-ink transition"
+            className="relative z-[1] grid h-8 w-8 place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
           >
-            <RefreshCw className={`w-4 h-4 ${scanning ? "animate-spin text-primary" : ""}`} />
+            <RefreshCw
+              className={`h-4 w-4 ${scanning ? "animate-spin text-primary" : ""}`}
+            />
           </button>
 
           <button
             onClick={pickImport}
-            className="relative z-[1] h-8 flex items-center gap-1.5 px-3.5 rounded-full bg-primary text-white text-xs font-bold hover:bg-primary-light transition"
+            className="relative z-[1] flex h-8 items-center gap-1.5 rounded-full bg-primary px-3.5 text-xs font-bold text-white transition hover:bg-primary-light"
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="h-3.5 w-3.5" />
             {t("importBtn")}
           </button>
         </>

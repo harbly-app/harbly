@@ -1,6 +1,7 @@
 //! File interchange with the system clipboard (macOS NSPasteboard):
 //! - ⌘C in the app → write file URLs, so ⌘V works directly in Finder;
 //! - ⌘C in Finder → ⌘V in the app reads the file paths back and pastes them into the library.
+//!
 //! Also provides a bridge that forwards edit actions like copy:/paste: to the first
 //! responder — since the menu's ⌘C/⌘V are taken over by custom items, text editing
 //! inside input fields still goes through the system responder chain.

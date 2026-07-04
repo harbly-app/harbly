@@ -16,7 +16,11 @@ pub fn extract(content: &str) -> Extracted {
         let el = doc.select(&s).next()?;
         let t = el.text().collect::<String>();
         let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
-        if t.is_empty() { None } else { Some(t) }
+        if t.is_empty() {
+            None
+        } else {
+            Some(t)
+        }
     };
     let title = pick_text("title").or_else(|| pick_text("h1"));
 

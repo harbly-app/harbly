@@ -7,7 +7,11 @@
 pub const SUPPORTED: [&str; 6] = ["zh-CN", "zh-TW", "en", "ja", "ko", "es"];
 
 pub fn normalize(lang: &str) -> &'static str {
-    SUPPORTED.iter().find(|l| **l == lang).copied().unwrap_or("zh-CN")
+    SUPPORTED
+        .iter()
+        .find(|l| **l == lang)
+        .copied()
+        .unwrap_or("zh-CN")
 }
 
 /// All localized strings for the menu bar and operation templates

@@ -1,10 +1,16 @@
 import { create } from "zustand";
 import { api } from "./api";
-import { initialLang, localizeError, setCurrentLang, tr } from "./i18n";
+import { initialLang, isLang, localizeError, setCurrentLang, tr } from "./i18n";
 import type { Lang } from "./i18n";
 import { applyThemePref, initialThemePref } from "./theme";
 import type { ThemePref } from "./theme";
-import type { AssetMeta, ImportResult, SortKey, TagInfo, TreeNode } from "./types";
+import type {
+  AssetMeta,
+  ImportResult,
+  SortKey,
+  TagInfo,
+  TreeNode,
+} from "./types";
 import { INBOX } from "./types";
 
 export type Modal =
@@ -64,63 +70,72 @@ interface S {
   /** Appearance preference; "system" follows the OS live */
   theme: ThemePref;
 
-  setLang(l: Lang): void;
-  setTheme(t: ThemePref): void;
-  toggleSidebar(): void;
-  boot(): Promise<void>;
-  enterMain(): Promise<void>;
-  refresh(): Promise<void>;
-  setFolder(rel: string): void;
-  setSort(s: SortKey): void;
-  setSel(ids: string[], anchor?: string | null): void;
-  selectAll(): void;
-  openViewer(id: string): void;
-  closeViewer(): void;
-  startEditAsset(id: string): void;
-  startEditFolder(rel: string): void;
-  stopEdit(): void;
-  doTrash(ids: string[]): Promise<void>;
-  undo(): Promise<void>;
-  redo(): Promise<void>;
-  doRename(id: string, name: string): Promise<void>;
-  doMove(ids: string[], dest: string): Promise<void>;
-  doCreateFolder(parent: string, name: string): Promise<void>;
-  doRenameFolder(rel: string, name: string): Promise<void>;
-  focusFolder(rel: string): void;
-  requestDeleteFolder(rel: string): Promise<void>;
-  doDeleteFolder(rel: string): Promise<void>;
-  doDuplicateFolder(rel: string): Promise<void>;
-  doDuplicateAsset(id: string): Promise<void>;
-  doExportAsset(id: string): Promise<void>;
-  doExportFolder(rel: string): Promise<void>;
-  copyFiles(ids?: string[]): Promise<void>;
-  pasteFiles(move: boolean): Promise<void>;
-  startDrag(d: DragPayload): void;
-  setDropTarget(rel: string | null): void;
-  endDrag(): Promise<void>;
-  importFiles(paths: string[]): Promise<void>;
-  pickImport(): Promise<void>;
-  setModal(m: Modal | null): void;
-  setPalette(b: boolean): void;
-  showToast(t: string | Toast): void;
-  bumpThumb(id: string): void;
-  setDragOver(b: boolean): void;
+  // Actions as arrow-function properties (they never use `this`, and this
+  // keeps references like useStore((s) => s.setPalette) bind-safe)
+  setLang: (l: Lang) => void;
+  setTheme: (t: ThemePref) => void;
+  toggleSidebar: () => void;
+  boot: () => Promise<void>;
+  enterMain: () => Promise<void>;
+  refresh: () => Promise<void>;
+  setFolder: (rel: string) => void;
+  setSort: (s: SortKey) => void;
+  setSel: (ids: string[], anchor?: string | null) => void;
+  selectAll: () => void;
+  openViewer: (id: string) => void;
+  closeViewer: () => void;
+  startEditAsset: (id: string) => void;
+  startEditFolder: (rel: string) => void;
+  stopEdit: () => void;
+  doTrash: (ids: string[]) => Promise<void>;
+  undo: () => Promise<void>;
+  redo: () => Promise<void>;
+  doRename: (id: string, name: string) => Promise<void>;
+  doMove: (ids: string[], dest: string) => Promise<void>;
+  doCreateFolder: (parent: string, name: string) => Promise<void>;
+  doRenameFolder: (rel: string, name: string) => Promise<void>;
+  focusFolder: (rel: string) => void;
+  requestDeleteFolder: (rel: string) => Promise<void>;
+  doDeleteFolder: (rel: string) => Promise<void>;
+  doDuplicateFolder: (rel: string) => Promise<void>;
+  doDuplicateAsset: (id: string) => Promise<void>;
+  doExportAsset: (id: string) => Promise<void>;
+  doExportFolder: (rel: string) => Promise<void>;
+  copyFiles: (ids?: string[]) => Promise<void>;
+  pasteFiles: (move: boolean) => Promise<void>;
+  startDrag: (d: DragPayload) => void;
+  setDropTarget: (rel: string | null) => void;
+  endDrag: () => Promise<void>;
+  importFiles: (paths: string[]) => Promise<void>;
+  pickImport: () => Promise<void>;
+  setModal: (m: Modal | null) => void;
+  setPalette: (b: boolean) => void;
+  showToast: (t: string | Toast) => void;
+  bumpThumb: (id: string) => void;
+  setDragOver: (b: boolean) => void;
 }
 
 function isTagView(folder: string) {
   return folder.startsWith("#");
 }
 
-function viewExists(tree: TreeNode | null, tags: TagInfo[], folder: string): boolean {
+function viewExists(
+  tree: TreeNode | null,
+  tags: TagInfo[],
+  folder: string,
+): boolean {
   if (folder === "" || folder === INBOX) return true;
   if (isTagView(folder)) return tags.some((t) => `#${t.name}` === folder);
   if (!tree) return false;
-  const walk = (n: TreeNode): boolean => n.rel === folder || n.children.some(walk);
+  const walk = (n: TreeNode): boolean =>
+    n.rel === folder || n.children.some(walk);
   return tree.children.some(walk);
 }
 
 function fetchAssets(folder: string, sort: SortKey): Promise<AssetMeta[]> {
-  return isTagView(folder) ? api.assetsByTag(folder.slice(1)) : api.listAssets(folder, sort);
+  return isTagView(folder)
+    ? api.assetsByTag(folder.slice(1))
+    : api.listAssets(folder, sort);
 }
 
 /** Destination directory for import/paste: tag views land in the library root, all other views in the current folder */
@@ -136,7 +151,10 @@ function importToast(get: () => S, r: ImportResult): Toast {
   if (r.skipped) parts.push(tr("skippedNonHtmlN", { n: r.skipped }));
   const toast: Toast = { text: parts.join(" · ") || tr("nothingImported") };
   if (r.duplicates > 0 && r.dupOf.length > 0) {
-    toast.action = { label: tr("viewExisting"), fn: () => get().openViewer(r.dupOf[0]) };
+    toast.action = {
+      label: tr("viewExisting"),
+      fn: () => get().openViewer(r.dupOf[0]),
+    };
   }
   return toast;
 }
@@ -203,7 +221,7 @@ export const useStore = create<S>((set, get) => ({
       api.setLanguage(get().lang).catch(() => {});
     } else {
       const saved = await api.getLanguage().catch(() => null);
-      if (saved && saved !== get().lang) get().setLang(saved as Lang);
+      if (saved && isLang(saved) && saved !== get().lang) get().setLang(saved);
       else api.setLanguage(get().lang).catch(() => {});
     }
     try {
@@ -228,7 +246,11 @@ export const useStore = create<S>((set, get) => ({
 
   refresh: async () => {
     const { folder, sort } = get();
-    const [tree, inbox, tags] = await Promise.all([api.dirTree(), api.inboxCount(), api.allTags()]);
+    const [tree, inbox, tags] = await Promise.all([
+      api.dirTree(),
+      api.inboxCount(),
+      api.allTags(),
+    ]);
     const f = viewExists(tree, tags, folder) ? folder : "";
     const assets = await fetchAssets(f, sort);
     // Drop assets that no longer exist from the selection
@@ -240,7 +262,8 @@ export const useStore = create<S>((set, get) => ({
       folder: f,
       assets,
       selIds: s.selIds.filter((id) => alive.has(id)),
-      editingAsset: s.editingAsset && alive.has(s.editingAsset) ? s.editingAsset : null,
+      editingAsset:
+        s.editingAsset && alive.has(s.editingAsset) ? s.editingAsset : null,
     }));
     api.requestThumbs(assets.map((a) => a.id)).catch(() => {});
     // While the viewer is open, refresh its metadata too (external edit → preview auto-updates; deleted → close)
@@ -255,7 +278,14 @@ export const useStore = create<S>((set, get) => ({
   },
 
   setFolder: (rel) => {
-    set({ folder: rel, selIds: [], anchorId: null, editingAsset: null, editingFolder: null, folderArmed: false });
+    set({
+      folder: rel,
+      selIds: [],
+      anchorId: null,
+      editingAsset: null,
+      editingFolder: null,
+      folderArmed: false,
+    });
     fetchAssets(rel, get().sort)
       .then((assets) => {
         if (get().folder === rel) {
@@ -281,7 +311,11 @@ export const useStore = create<S>((set, get) => ({
   },
 
   setSel: (ids, anchor) =>
-    set((s) => ({ selIds: ids, anchorId: anchor !== undefined ? anchor : s.anchorId, folderArmed: false })),
+    set((s) => ({
+      selIds: ids,
+      anchorId: anchor !== undefined ? anchor : s.anchorId,
+      folderArmed: false,
+    })),
 
   selectAll: () => {
     const ids = get().assets.map((a) => a.id);
@@ -310,18 +344,28 @@ export const useStore = create<S>((set, get) => ({
     // so repeated Cmd+Backspace walks through files (and never falls through to the folder)
     const gone = new Set(ids);
     const firstIdx = st.assets.findIndex((a) => gone.has(a.id));
-    set((s) => ({ modal: null, folderArmed: false, selIds: s.selIds.filter((x) => !gone.has(x)) }));
+    set((s) => ({
+      modal: null,
+      folderArmed: false,
+      selIds: s.selIds.filter((x) => !gone.has(x)),
+    }));
     try {
       const r = await api.assetsTrash(ids);
       await get().refresh();
       if (firstIdx >= 0 && !get().selIds.length && !get().viewerAsset) {
         const after = get().assets;
-        const next = after[Math.min(firstIdx, after.length - 1)];
+        const next = after.at(Math.min(firstIdx, after.length - 1));
         if (next) set({ selIds: [next.id], anchorId: next.id });
       }
-      const text = r.count === 1 ? tr("trashedOne") : tr("trashedN", { n: r.count });
+      const text =
+        r.count === 1 ? tr("trashedOne") : tr("trashedN", { n: r.count });
       get().showToast(
-        r.undoable ? { text, action: { label: tr("undoAction"), fn: () => get().undo() } } : text
+        r.undoable
+          ? {
+              text,
+              action: { label: tr("undoAction"), fn: () => void get().undo() },
+            }
+          : text,
       );
     } catch (e) {
       get().showToast(String(e));
@@ -332,7 +376,8 @@ export const useStore = create<S>((set, get) => ({
     try {
       const r = await api.undoOp();
       if (!r) get().showToast(tr("nothingToUndo"));
-      else if (r.count === 0) get().showToast(tr("cannotUndo", { label: r.label }));
+      else if (r.count === 0)
+        get().showToast(tr("cannotUndo", { label: r.label }));
       else get().showToast(tr("undone", { label: r.label }));
     } catch (e) {
       get().showToast(String(e));
@@ -343,7 +388,8 @@ export const useStore = create<S>((set, get) => ({
     try {
       const r = await api.redoOp();
       if (!r) get().showToast(tr("nothingToRedo"));
-      else if (r.count === 0) get().showToast(tr("cannotRedo", { label: r.label }));
+      else if (r.count === 0)
+        get().showToast(tr("cannotRedo", { label: r.label }));
       else get().showToast(tr("redone", { label: r.label }));
     } catch (e) {
       get().showToast(String(e));
@@ -364,10 +410,14 @@ export const useStore = create<S>((set, get) => ({
       const n = await api.assetsMove(ids, dest);
       set({ modal: null });
       if (n > 0) {
-        const where = dest === "" ? tr("libraryRoot") : dest === INBOX ? tr("inbox") : dest;
+        const where =
+          dest === "" ? tr("libraryRoot") : dest === INBOX ? tr("inbox") : dest;
         get().showToast({
-          text: n === 1 ? tr("movedTo", { dest: where }) : tr("movedNTo", { n, dest: where }),
-          action: { label: tr("undoAction"), fn: () => get().undo() },
+          text:
+            n === 1
+              ? tr("movedTo", { dest: where })
+              : tr("movedNTo", { n, dest: where }),
+          action: { label: tr("undoAction"), fn: () => void get().undo() },
         });
       }
     } catch (e) {
@@ -399,11 +449,13 @@ export const useStore = create<S>((set, get) => ({
   // empty folders trash immediately; non-empty ones confirm first, Enter = fast confirm
   requestDeleteFolder: async (rel) => {
     if (!rel || rel === INBOX || isTagView(rel)) return;
-    const label = rel.split("/").pop() || rel;
+    const label = rel.split("/").pop() ?? rel;
     let hasContent = true; // if the probe fails, err on the side of asking
     try {
       hasContent = await api.folderHasContent(rel);
-    } catch {}
+    } catch {
+      // keep hasContent = true
+    }
     if (!hasContent) return get().doDeleteFolder(rel);
     set({ modal: { kind: "confirmDeleteFolder", rel, label } });
   },
@@ -416,8 +468,11 @@ export const useStore = create<S>((set, get) => ({
       if (get().folder.startsWith(rel)) get().setFolder("");
       get().showToast(
         undoable
-          ? { text: tr("folderTrashed"), action: { label: tr("undoAction"), fn: () => get().undo() } }
-          : tr("folderTrashed")
+          ? {
+              text: tr("folderTrashed"),
+              action: { label: tr("undoAction"), fn: () => void get().undo() },
+            }
+          : tr("folderTrashed"),
       );
     } catch (e) {
       get().showToast(String(e));
@@ -463,11 +518,19 @@ export const useStore = create<S>((set, get) => ({
   // Cmd+C: write file URLs to the system pasteboard (can Cmd+V directly in Finder); copies the current file when the viewer is open
   copyFiles: async (ids) => {
     const st = get();
-    const list = ids?.length ? ids : st.selIds.length ? st.selIds : st.viewerAsset ? [st.viewerAsset.id] : [];
+    const list = ids?.length
+      ? ids
+      : st.selIds.length
+        ? st.selIds
+        : st.viewerAsset
+          ? [st.viewerAsset.id]
+          : [];
     if (!list.length) return;
     try {
       const n = await api.pasteboardCopy(list);
-      get().showToast(n === 1 ? tr("copiedPasteboard") : tr("copiedPasteboardN", { n }));
+      get().showToast(
+        n === 1 ? tr("copiedPasteboard") : tr("copiedPasteboardN", { n }),
+      );
     } catch (e) {
       get().showToast(String(e));
     }
@@ -486,7 +549,10 @@ export const useStore = create<S>((set, get) => ({
           : r.moved > 0
             ? tr("movedN", { n: r.moved })
             : tr("pastedN", { n: r.copied });
-      get().showToast({ text, action: { label: tr("undoAction"), fn: () => get().undo() } });
+      get().showToast({
+        text,
+        action: { label: tr("undoAction"), fn: () => void get().undo() },
+      });
     } catch (e) {
       const msg = String(e);
       // The pasteboard often has no files (maybe just text) — stay quiet in that case
@@ -519,7 +585,8 @@ export const useStore = create<S>((set, get) => ({
   pickImport: async () => {
     try {
       const r = await api.pickAndImport(importDest(get().folder));
-      if (r.added || r.duplicates || r.renamed || r.skipped) get().showToast(importToast(get, r));
+      if (r.added || r.duplicates || r.renamed || r.skipped)
+        get().showToast(importToast(get, r));
     } catch (e) {
       get().showToast(String(e));
     }
@@ -537,7 +604,9 @@ export const useStore = create<S>((set, get) => ({
   },
 
   bumpThumb: (id) =>
-    set((s) => ({ thumbEpoch: { ...s.thumbEpoch, [id]: (s.thumbEpoch[id] || 0) + 1 } })),
+    set((s) => ({
+      thumbEpoch: { ...s.thumbEpoch, [id]: (s.thumbEpoch[id] || 0) + 1 },
+    })),
 
   setDragOver: (b) => set({ dragOver: b }),
 }));

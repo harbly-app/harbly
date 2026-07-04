@@ -40,7 +40,7 @@ export default function RenameInput(props: {
       onMouseDown={(e) => e.stopPropagation()}
       className={
         props.className ??
-        "w-full h-6 px-1.5 rounded border border-primary bg-card outline-none text-[12.5px]"
+        "h-6 w-full rounded border border-primary bg-card px-1.5 text-[12.5px] outline-none"
       }
     />
   );

@@ -1,5 +1,7 @@
 use crate::i18n;
-use tauri::menu::{AboutMetadataBuilder, Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{
+    AboutMetadataBuilder, Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
+};
 use tauri::{AppHandle, Emitter};
 
 /// Native menu bar: all actions are bridged to the frontend via the "menu-action" event.
@@ -112,7 +114,10 @@ pub fn setup(app: &AppHandle, lang: &str) -> tauri::Result<()> {
     let window = SubmenuBuilder::new(app, t.menu_window)
         .item(&PredefinedMenuItem::minimize(app, Some(t.minimize))?)
         .separator()
-        .item(&PredefinedMenuItem::close_window(app, Some(t.close_window))?)
+        .item(&PredefinedMenuItem::close_window(
+            app,
+            Some(t.close_window),
+        )?)
         .build()?;
 
     let menu = Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window])?;

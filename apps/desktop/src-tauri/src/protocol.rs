@@ -18,14 +18,23 @@ const RELAXED_CSP: &str = "default-src 'none'; script-src 'unsafe-inline' 'unsaf
 
 const CSP_REPORTER: &str = "<script>(function(){var n=0;addEventListener('securitypolicyviolation',function(e){n++;try{parent.postMessage({__harbly:'csp',count:n,uri:String(e.blockedURI||'')},'*')}catch(_){}})})();</script>";
 
-fn resp(status: u16, ctype: &str, csp: Option<&str>, body: Vec<u8>) -> http::Response<Cow<'static, [u8]>> {
+fn resp(
+    status: u16,
+    ctype: &str,
+    csp: Option<&str>,
+    body: Vec<u8>,
+) -> http::Response<Cow<'static, [u8]>> {
     let mut b = http::Response::builder()
         .status(status)
         .header("Content-Type", ctype)
         .header("Access-Control-Allow-Origin", "*")
         .header(
             "Cache-Control",
-            if csp.is_some() { "no-store" } else { "public, max-age=31536000, immutable" },
+            if csp.is_some() {
+                "no-store"
+            } else {
+                "public, max-age=31536000, immutable"
+            },
         );
     if let Some(csp) = csp {
         b = b.header("Content-Security-Policy", csp);
@@ -83,7 +92,9 @@ pub fn asset_protocol<R: Runtime>(
     let (file, asset_id) = match segs.as_slice() {
         [kind, id] if kind == "current" => (lib.asset_abs_path(id).ok(), Some(id.clone())),
         [kind, id, ver] if kind == "version" => (
-            ver.parse::<i64>().ok().map(|v| lib.version_file_path(id, v)),
+            ver.parse::<i64>()
+                .ok()
+                .map(|v| lib.version_file_path(id, v)),
             Some(id.clone()),
         ),
         _ => (None, None),
@@ -105,7 +116,12 @@ pub fn asset_protocol<R: Runtime>(
     }
 
     match std::fs::read(&file) {
-        Ok(bytes) => resp(200, "text/html; charset=utf-8", Some(csp), inject_reporter(bytes)),
+        Ok(bytes) => resp(
+            200,
+            "text/html; charset=utf-8",
+            Some(csp),
+            inject_reporter(bytes),
+        ),
         Err(_) => not_found(),
     }
 }

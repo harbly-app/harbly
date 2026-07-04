@@ -22,23 +22,23 @@ export default function App() {
   const t = makeT(useStore((s) => s.lang));
 
   useEffect(() => {
-    useStore.getState().boot();
+    void useStore.getState().boot();
   }, []);
 
   useEffect(() => {
-    const unsubs: Array<() => void> = [];
+    const unsubs: (() => void)[] = [];
     let alive = true;
     const keep = (u: () => void) => {
       if (alive) unsubs.push(u);
       else u();
     };
 
-    listen("library-changed", () => {
+    void listen("library-changed", () => {
       const st = useStore.getState();
-      if (st.phase === "main") st.refresh();
+      if (st.phase === "main") void st.refresh();
     }).then(keep);
 
-    listen<{ assetId: string }>("thumb-updated", (e) => {
+    void listen<{ assetId: string }>("thumb-updated", (e) => {
       useStore.getState().bumpThumb(e.payload.assetId);
     }).then(keep);
 
@@ -59,17 +59,18 @@ export default function App() {
     };
 
     // Native menu bar actions
-    listen<string>("menu-action", (e) => {
+    void listen<string>("menu-action", (e) => {
       const st = useStore.getState();
       if (st.phase !== "main" && e.payload !== "settings") return;
       switch (e.payload) {
         case "import":
-          st.pickImport();
+          void st.pickImport();
           break;
         case "new-folder":
           st.setModal({
             kind: "newFolder",
-            parent: st.folder.startsWith("#") || st.folder === INBOX ? "" : st.folder,
+            parent:
+              st.folder.startsWith("#") || st.folder === INBOX ? "" : st.folder,
           });
           break;
         case "reveal-library":
@@ -89,24 +90,27 @@ export default function App() {
           break;
         case "undo":
           // Input focused = text undo; otherwise undo the last file operation (Finder-style Cmd+Z)
+          // eslint-disable-next-line @typescript-eslint/no-deprecated -- no modern API triggers text-field undo programmatically
           if (editableFocused()) document.execCommand("undo");
-          else st.undo();
+          else void st.undo();
           break;
         case "redo":
+          // eslint-disable-next-line @typescript-eslint/no-deprecated -- no modern API triggers text-field redo programmatically
           if (editableFocused()) document.execCommand("redo");
-          else st.redo();
+          else void st.redo();
           break;
         case "copy":
           // Text selected / editing → forward system copy: (text copy works as usual); otherwise copy selected files
-          if (editableFocused() || hasTextSelection()) api.forwardEdit("copy").catch(() => {});
-          else st.copyFiles();
+          if (editableFocused() || hasTextSelection())
+            api.forwardEdit("copy").catch(() => {});
+          else void st.copyFiles();
           break;
         case "paste":
           if (editableFocused()) api.forwardEdit("paste").catch(() => {});
-          else st.pasteFiles(false);
+          else void st.pasteFiles(false);
           break;
         case "paste-move":
-          if (!editableFocused()) st.pasteFiles(true);
+          if (!editableFocused()) void st.pasteFiles(true);
           break;
         case "select-all":
           if (editableFocused()) api.forwardEdit("selectAll").catch(() => {});
@@ -123,18 +127,18 @@ export default function App() {
             : st.viewerAsset
               ? [st.viewerAsset.id]
               : [];
-          if (ids.length) st.doTrash(ids);
+          if (ids.length) void st.doTrash(ids);
           // Folder deletion only when armed by an explicit sidebar folder click — an empty
           // selection after deleting files must NOT fall through to the folder
           // (root / inbox / tag views are additionally rejected inside requestDeleteFolder)
-          else if (st.folderArmed) st.requestDeleteFolder(st.folder);
+          else if (st.folderArmed) void st.requestDeleteFolder(st.folder);
           break;
         }
       }
     }).then(keep);
 
     try {
-      getCurrentWebview()
+      void getCurrentWebview()
         .onDragDropEvent((event) => {
           const st = useStore.getState();
           if (st.phase !== "main") return;
@@ -142,7 +146,7 @@ export default function App() {
           if (p.type === "enter" || p.type === "over") st.setDragOver(true);
           else if (p.type === "drop") {
             st.setDragOver(false);
-            st.importFiles(p.paths);
+            void st.importFiles(p.paths);
           } else st.setDragOver(false);
         })
         .then(keep);
@@ -173,7 +177,10 @@ export default function App() {
 
   if (phase === "loading") {
     return (
-      <div className="h-screen grid place-items-center text-sub" data-tauri-drag-region>
+      <div
+        className="grid h-screen place-items-center text-sub"
+        data-tauri-drag-region
+      >
         {t("booting")}
       </div>
     );
@@ -181,9 +188,9 @@ export default function App() {
   if (phase === "onboarding") return <Onboarding />;
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
+    <div className="flex h-screen flex-col overflow-hidden">
       <TitleBar />
-      <div className="flex-1 flex min-h-0">
+      <div className="flex min-h-0 flex-1">
         <Sidebar />
         {viewerOpen ? <Viewer /> : <AssetGrid />}
       </div>
@@ -191,20 +198,20 @@ export default function App() {
       <Modals />
       <DragGhost />
       {dragOver && (
-        <div className="fixed inset-0 z-50 pointer-events-none bg-primary/5 border-4 border-primary/70 rounded-xl grid place-items-center">
-          <div className="bg-primary text-white text-sm font-semibold px-5 py-2.5 rounded-full shadow-lg">
+        <div className="pointer-events-none fixed inset-0 z-50 grid place-items-center rounded-xl border-4 border-primary/70 bg-primary/5">
+          <div className="rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-lg">
             {t("dropToImport")}
           </div>
         </div>
       )}
       {toast && (
         // ink/paper swap so the pill stays high-contrast in both themes (dark theme = light pill)
-        <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-ink text-paper text-xs px-4 py-2.5 rounded-full shadow-lg">
+        <div className="fixed bottom-12 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full bg-ink px-4 py-2.5 text-xs text-paper shadow-lg">
           <span>{toast.text}</span>
           {toast.action && (
             <button
               onClick={toast.action.fn}
-              className="font-bold text-primary-light hover:opacity-75 transition shrink-0"
+              className="shrink-0 font-bold text-primary-light transition hover:opacity-75"
             >
               {toast.action.label}
             </button>

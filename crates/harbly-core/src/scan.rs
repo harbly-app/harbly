@@ -1,6 +1,8 @@
 use crate::error::Result;
 use crate::types::*;
-use crate::{extract, file_stem, is_hidden_component, is_html, now, parent_folder, unique_name, Library};
+use crate::{
+    extract, file_stem, is_hidden_component, is_html, now, parent_folder, unique_name, Library,
+};
 use rusqlite::{params, OptionalExtension};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -49,7 +51,7 @@ impl Library {
                 continue;
             }
             indexed += 1;
-            if indexed % 25 == 0 {
+            if indexed.is_multiple_of(25) {
                 progress(ScanProgress { found, indexed });
             }
         }
@@ -88,8 +90,12 @@ impl Library {
     fn migrate_db_tags_to_xattr(&self) -> Result<()> {
         let done: Option<String> = {
             let db = self.db.lock().unwrap();
-            db.query_row("SELECT value FROM meta WHERE key='tags_in_xattr'", [], |r| r.get(0))
-                .optional()?
+            db.query_row(
+                "SELECT value FROM meta WHERE key='tags_in_xattr'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?
         };
         if done.is_some() {
             return Ok(());
@@ -103,7 +109,10 @@ impl Library {
             }
         }
         let db = self.db.lock().unwrap();
-        db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('tags_in_xattr','1')", [])?;
+        db.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES('tags_in_xattr','1')",
+            [],
+        )?;
         Ok(())
     }
 
@@ -187,6 +196,10 @@ impl Library {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "internal write path; a params struct would just mirror the columns"
+    )]
     pub(crate) fn insert_new_asset(
         &self,
         rel: &str,
@@ -259,7 +272,13 @@ impl Library {
     }
 
     /// A version = a full file, stored at .harbly/versions/<asset_id>/vN.html
-    pub(crate) fn write_version(&self, asset_id: &str, content: &[u8], hash: &str, label: &str) -> Result<i64> {
+    pub(crate) fn write_version(
+        &self,
+        asset_id: &str,
+        content: &[u8],
+        hash: &str,
+        label: &str,
+    ) -> Result<i64> {
         let next: i64 = {
             let db = self.db.lock().unwrap();
             db.query_row(
@@ -318,8 +337,12 @@ impl Library {
             let hash = blake3::hash(&content).to_hex().to_string();
             let dup: Option<String> = {
                 let db = self.db.lock().unwrap();
-                db.query_row("SELECT id FROM assets WHERE current_hash=?1 LIMIT 1", [&hash], |r| r.get(0))
-                    .optional()?
+                db.query_row(
+                    "SELECT id FROM assets WHERE current_hash=?1 LIMIT 1",
+                    [&hash],
+                    |r| r.get(0),
+                )
+                .optional()?
             };
             if let Some(existing) = dup {
                 res.duplicates += 1;
@@ -350,7 +373,15 @@ impl Library {
             } else {
                 format!("{dest_rel}/{name}")
             };
-            self.insert_new_asset(&rel, &content, &hash, content.len() as i64, mtime, "import", "初始导入")?;
+            self.insert_new_asset(
+                &rel,
+                &content,
+                &hash,
+                content.len() as i64,
+                mtime,
+                "import",
+                "初始导入",
+            )?;
             res.imported.push(rel);
             res.added += 1;
         }

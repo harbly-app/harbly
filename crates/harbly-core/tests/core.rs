@@ -22,7 +22,11 @@ fn scan_index_search_chinese() {
         html("季度营收仪表盘", "Q2 营收总览，定价策略与净收入留存"),
     )
     .unwrap();
-    fs::write(root.join("dashboard.html"), html("Revenue Dashboard", "quarterly pricing overview")).unwrap();
+    fs::write(
+        root.join("dashboard.html"),
+        html("Revenue Dashboard", "quarterly pricing overview"),
+    )
+    .unwrap();
 
     let sum = lib.scan(|_| {}).unwrap();
     assert_eq!(sum.added, 2);
@@ -47,7 +51,9 @@ fn scan_index_search_chinese() {
     // Listing: empty string = "All Assets", the whole library recursively; concrete folder = direct files only
     let all = lib.list_assets("", SortKey::Recent).unwrap();
     assert_eq!(all.len(), 2);
-    let in_folder = lib.list_assets("客户项目/星链SaaS", SortKey::Recent).unwrap();
+    let in_folder = lib
+        .list_assets("客户项目/星链SaaS", SortKey::Recent)
+        .unwrap();
     assert_eq!(in_folder.len(), 1);
     assert_eq!(in_folder[0].file_name, "季度营收仪表盘.html");
 }
@@ -61,7 +67,16 @@ fn import_dedup_and_rename() {
     fs::write(outside.join("b.html"), html("B", "内容乙")).unwrap();
     fs::write(outside.join("readme.txt"), "not html").unwrap();
 
-    let r = lib.import_files(&[outside.join("a.html"), outside.join("b.html"), outside.join("readme.txt")], "").unwrap();
+    let r = lib
+        .import_files(
+            &[
+                outside.join("a.html"),
+                outside.join("b.html"),
+                outside.join("readme.txt"),
+            ],
+            "",
+        )
+        .unwrap();
     assert_eq!(r.added, 2);
     assert_eq!(r.skipped, 1);
 
@@ -154,7 +169,8 @@ fn tags_and_export() {
     assert!(assets[0].tags.is_empty());
 
     // Tag → tags come back in metadata → tag list → fetch by tag
-    lib.set_tags(&assets[0].id, &["仪表盘".into(), "重要".into()]).unwrap();
+    lib.set_tags(&assets[0].id, &["仪表盘".into(), "重要".into()])
+        .unwrap();
     lib.set_tags(&assets[1].id, &["重要".into()]).unwrap();
     let a = lib.asset(&assets[0].id).unwrap();
     assert_eq!(a.tags.len(), 2);
@@ -177,7 +193,11 @@ fn tags_and_export() {
 #[test]
 fn move_rename_inbox() {
     let (_tmp, lib) = setup();
-    fs::write(lib.root().join("_inbox").join("捕获.html"), html("新捕获", "插件收藏内容")).unwrap();
+    fs::write(
+        lib.root().join("_inbox").join("捕获.html"),
+        html("新捕获", "插件收藏内容"),
+    )
+    .unwrap();
     fs::write(lib.root().join("x.html"), html("X", "正文")).unwrap();
     lib.scan(|_| {}).unwrap();
     assert_eq!(lib.inbox_count().unwrap(), 1);
@@ -198,7 +218,11 @@ fn move_rename_inbox() {
     assert!(lib.root().join("改名.html").exists());
 
     // Finder move (simulated): raw rename then rescan; rebound by hash without losing versions
-    fs::rename(lib.root().join("改名.html"), lib.root().join("项目A/改名.html")).unwrap();
+    fs::rename(
+        lib.root().join("改名.html"),
+        lib.root().join("项目A/改名.html"),
+    )
+    .unwrap();
     let sum = lib.scan(|_| {}).unwrap();
     assert_eq!(sum.moved, 1);
     assert_eq!(sum.removed, 0);

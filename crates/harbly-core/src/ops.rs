@@ -86,7 +86,9 @@ impl Library {
     pub fn asset_abs_path(&self, id: &str) -> Result<std::path::PathBuf> {
         let rel: String = {
             let db = self.db.lock().unwrap();
-            db.query_row("SELECT rel_path FROM assets WHERE id=?1", [id], |r| r.get(0))?
+            db.query_row("SELECT rel_path FROM assets WHERE id=?1", [id], |r| {
+                r.get(0)
+            })?
         };
         Ok(self.abs(&rel))
     }
@@ -115,7 +117,11 @@ impl Library {
 
     pub fn inbox_count(&self) -> Result<i64> {
         let db = self.db.lock().unwrap();
-        Ok(db.query_row("SELECT COUNT(*) FROM assets WHERE folder=?1", [INBOX_DIR], |r| r.get(0))?)
+        Ok(db.query_row(
+            "SELECT COUNT(*) FROM assets WHERE folder=?1",
+            [INBOX_DIR],
+            |r| r.get(0),
+        )?)
     }
 
     pub fn total_count(&self) -> Result<i64> {
@@ -188,13 +194,20 @@ impl Library {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             for (id, rel, folder, vc) in rows {
                 let name = rel.rsplit('/').next().unwrap_or(&rel).to_string();
-                files_of.entry(folder).or_default().push(TreeFile { id, name, ver_count: vc });
+                files_of.entry(folder).or_default().push(TreeFile {
+                    id,
+                    name,
+                    ver_count: vc,
+                });
             }
         }
 
         let mut children_of: HashMap<String, Vec<String>> = HashMap::new();
         for d in &dirs {
-            children_of.entry(parent_folder(d)).or_default().push(d.clone());
+            children_of
+                .entry(parent_folder(d))
+                .or_default()
+                .push(d.clone());
         }
 
         fn build(
@@ -209,9 +222,18 @@ impl Library {
                 .cloned()
                 .unwrap_or_default()
                 .iter()
-                .map(|c| build(c, c.rsplit('/').next().unwrap_or(c), children_of, direct, files_of))
+                .map(|c| {
+                    build(
+                        c,
+                        c.rsplit('/').next().unwrap_or(c),
+                        children_of,
+                        direct,
+                        files_of,
+                    )
+                })
                 .collect();
-            let count = direct.get(rel).copied().unwrap_or(0) + kids.iter().map(|k| k.count).sum::<i64>();
+            let count =
+                direct.get(rel).copied().unwrap_or(0) + kids.iter().map(|k| k.count).sum::<i64>();
             TreeNode {
                 name: name.to_string(),
                 rel: rel.to_string(),
@@ -255,7 +277,11 @@ impl Library {
             return Err(HarblyError::msg("无效的文件夹名"));
         }
         let parent = parent_folder(rel);
-        let new_rel = if parent.is_empty() { name } else { format!("{parent}/{name}") };
+        let new_rel = if parent.is_empty() {
+            name
+        } else {
+            format!("{parent}/{name}")
+        };
         if new_rel == rel {
             return Ok(new_rel);
         }
@@ -325,8 +351,15 @@ impl Library {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
         let hash = blake3::hash(&content).to_hex().to_string();
-        let new_id =
-            self.insert_new_asset(&rel, &content, &hash, content.len() as i64, mtime, "duplicate", "复制副本")?;
+        let new_id = self.insert_new_asset(
+            &rel,
+            &content,
+            &hash,
+            content.len() as i64,
+            mtime,
+            "duplicate",
+            "复制副本",
+        )?;
         self.asset(&new_id)
     }
 
@@ -387,7 +420,13 @@ impl Library {
                 if let Ok(rows) = stmt.query_map([q], row_to_asset) {
                     for a in rows.filter_map(|r| r.ok()) {
                         if !out.iter().any(|h| h.asset.id == a.id) {
-                            out.insert(0, SearchHit { asset: a, snippet: format!("标签: {q}") });
+                            out.insert(
+                                0,
+                                SearchHit {
+                                    asset: a,
+                                    snippet: format!("标签: {q}"),
+                                },
+                            );
                         }
                     }
                 }
@@ -427,7 +466,12 @@ impl Library {
             "SELECT tag, COUNT(*) FROM asset_tags GROUP BY tag ORDER BY COUNT(*) DESC, tag COLLATE NOCASE",
         )?;
         let rows = stmt
-            .query_map([], |r| Ok(TagInfo { name: r.get(0)?, count: r.get(1)? }))?
+            .query_map([], |r| {
+                Ok(TagInfo {
+                    name: r.get(0)?,
+                    count: r.get(1)?,
+                })
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -459,7 +503,9 @@ impl Library {
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_file())
         {
-            let Ok(inner) = entry.path().strip_prefix(&src) else { continue };
+            let Ok(inner) = entry.path().strip_prefix(&src) else {
+                continue;
+            };
             let Some(name) = inner.to_str() else { continue };
             zip.start_file(name.replace('\\', "/"), opts)
                 .map_err(|e| HarblyError::Msg(e.to_string()))?;
@@ -587,7 +633,14 @@ impl Library {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
-        self.update_asset_content(id, &content, &hash, content.len() as i64, mtime, &format!("回滚到 v{ver}"))?;
+        self.update_asset_content(
+            id,
+            &content,
+            &hash,
+            content.len() as i64,
+            mtime,
+            &format!("回滚到 v{ver}"),
+        )?;
         Ok(())
     }
 }

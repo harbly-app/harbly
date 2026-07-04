@@ -9,6 +9,8 @@ import type {
   TreeNode,
 } from "./types";
 
+// Commands whose Rust side returns `()` resolve to `null` in the webview,
+// hence invoke<null> rather than invoke<void>.
 export const api = {
   libraryStatus: () => invoke<{ root: string | null }>("library_status"),
   defaultLibraryPath: () => invoke<string>("default_library_path"),
@@ -23,50 +25,60 @@ export const api = {
   inboxCount: () => invoke<number>("inbox_count"),
   importPaths: (paths: string[], dest: string) =>
     invoke<ImportResult>("import_paths", { paths, dest }),
-  pickAndImport: (dest: string) => invoke<ImportResult>("pick_and_import", { dest }),
+  pickAndImport: (dest: string) =>
+    invoke<ImportResult>("pick_and_import", { dest }),
   search: (q: string) => invoke<SearchHit[]>("search_assets", { q }),
   rename: (id: string, newName: string) =>
     invoke<AssetMeta>("asset_rename", { id, newName }),
-  assetsMove: (ids: string[], dest: string) => invoke<number>("assets_move", { ids, dest }),
+  assetsMove: (ids: string[], dest: string) =>
+    invoke<number>("assets_move", { ids, dest }),
   assetsTrash: (ids: string[]) =>
     invoke<{ count: number; undoable: boolean }>("assets_trash", { ids }),
   undoOp: () => invoke<{ label: string; count: number } | null>("undo_op"),
   redoOp: () => invoke<{ label: string; count: number } | null>("redo_op"),
   pasteboardCopy: (ids: string[]) => invoke<number>("pasteboard_copy", { ids }),
   pasteboardPaste: (dest: string, moveItems: boolean) =>
-    invoke<{ count: number; moved: number; copied: number }>("pasteboard_paste", {
-      dest,
-      moveItems,
-    }),
-  forwardEdit: (action: "copy" | "paste" | "cut" | "selectAll" | "deleteToLineStart") =>
-    invoke<void>("forward_edit_action", { action }),
-  setLanguage: (lang: string) => invoke<void>("set_language", { lang }),
+    invoke<{ count: number; moved: number; copied: number }>(
+      "pasteboard_paste",
+      {
+        dest,
+        moveItems,
+      },
+    ),
+  forwardEdit: (
+    action: "copy" | "paste" | "cut" | "selectAll" | "deleteToLineStart",
+  ) => invoke<null>("forward_edit_action", { action }),
+  setLanguage: (lang: string) => invoke<null>("set_language", { lang }),
   getLanguage: () => invoke<string>("get_language"),
-  revealAsset: (id: string) => invoke<void>("reveal_asset", { id }),
-  openInBrowser: (id: string) => invoke<void>("open_in_browser", { id }),
-  revealFolder: (rel: string) => invoke<void>("reveal_folder", { rel }),
+  revealAsset: (id: string) => invoke<null>("reveal_asset", { id }),
+  openInBrowser: (id: string) => invoke<null>("open_in_browser", { id }),
+  revealFolder: (rel: string) => invoke<null>("reveal_folder", { rel }),
   createFolder: (parent: string, name: string) =>
     invoke<string>("create_folder", { parent, name }),
   folderRename: (rel: string, newName: string) =>
     invoke<string>("folder_rename", { rel, newName }),
   folderDelete: (rel: string) => invoke<boolean>("folder_delete", { rel }),
-  folderHasContent: (rel: string) => invoke<boolean>("folder_has_content", { rel }),
+  folderHasContent: (rel: string) =>
+    invoke<boolean>("folder_has_content", { rel }),
   folderDuplicate: (rel: string) => invoke<string>("folder_duplicate", { rel }),
   assetDuplicate: (id: string) => invoke<AssetMeta>("asset_duplicate", { id }),
-  setTags: (id: string, tags: string[]) => invoke<void>("set_tags", { id, tags }),
+  setTags: (id: string, tags: string[]) =>
+    invoke<null>("set_tags", { id, tags }),
   allTags: () => invoke<TagInfo[]>("all_tags"),
   assetsByTag: (tag: string) => invoke<AssetMeta[]>("assets_by_tag", { tag }),
   allowOnce: (id: string) => invoke<string>("asset_allow_once", { id }),
   exportAsset: (id: string) => invoke<string | null>("export_asset", { id }),
-  exportFolder: (rel: string) => invoke<string | null>("export_folder", { rel }),
-  thumbsRebuild: () => invoke<void>("thumbs_rebuild"),
-  requestThumbs: (ids: string[]) => invoke<void>("request_thumbs", { ids }),
+  exportFolder: (rel: string) =>
+    invoke<string | null>("export_folder", { rel }),
+  thumbsRebuild: () => invoke<null>("thumbs_rebuild"),
+  requestThumbs: (ids: string[]) => invoke<null>("request_thumbs", { ids }),
 };
 
 export const assetUrl = (id: string) =>
   `harbly-asset://localhost/current/${encodeURIComponent(id)}`;
 
-export const thumbUrl = (hash: string) => `harbly-thumb://localhost/${hash}.jpg`;
+export const thumbUrl = (hash: string) =>
+  `harbly-thumb://localhost/${hash}.jpg`;
 
 export function timeAgo(epochSec: number): string {
   const s = Math.max(0, Math.floor(Date.now() / 1000) - epochSec);

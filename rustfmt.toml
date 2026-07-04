@@ -1,0 +1,3 @@
+# Defaults only. `edition` is needed because bare `rustfmt` (editors,
+# lint-staged) does not read Cargo.toml — keep in sync with [workspace.package].
+edition = "2021"
