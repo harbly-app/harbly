@@ -9,7 +9,9 @@ mod tags_xattr;
 mod types;
 mod watch;
 
-pub use ai_meta::{AiRunRecord, NewAiRun};
+pub use ai_meta::{
+    AiMessage, AiRunRecord, AiSession, AiToolCtx, AiWriteOutcome, NewAiRun, AI_VERSION_LABEL,
+};
 pub use error::{HarblyError, Result};
 pub use markdown::md_to_html_body;
 pub use ops::copy_dir_recursive;

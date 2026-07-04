@@ -29,7 +29,8 @@ function PaletteBody() {
   const selIds = useStore((s) => s.selIds);
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
-  // "Ask AI" needs a concrete target: the open file, or a single selection
+  // The panel is library-scoped; a concrete target (open file or single
+  // selection) additionally attaches that file as context
   const aiTarget = viewerAsset?.id ?? (selIds.length === 1 ? selIds[0] : null);
 
   useEffect(() => {
@@ -115,23 +116,22 @@ function PaletteBody() {
             <div className="px-2.5 pt-2 pb-1 text-[10.5px] font-bold text-sub">
               {t("commandsGroup")}
             </div>
-            {aiTarget && (
-              <Command.Item
-                value="cmd-ai"
-                onSelect={() => {
-                  setPalette(false);
-                  st().openAiFor(aiTarget);
-                }}
-                className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 data-[selected=true]:bg-primary/10"
-              >
-                <Sparkles className="h-4 w-4 shrink-0 text-primary" />
-                <span className="text-[12.5px]">{t("aiPanelShow")}</span>
-                <span className="flex-1" />
-                <kbd className="rounded border border-line bg-side px-1.5 py-0.5 text-[10px] text-sub">
-                  ⌘J
-                </kbd>
-              </Command.Item>
-            )}
+            <Command.Item
+              value="cmd-ai"
+              onSelect={() => {
+                setPalette(false);
+                if (aiTarget) st().openAiFor(aiTarget);
+                else if (!st().aiOpen) st().toggleAi();
+              }}
+              className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 data-[selected=true]:bg-primary/10"
+            >
+              <Sparkles className="h-4 w-4 shrink-0 text-primary" />
+              <span className="text-[12.5px]">{t("aiPanelShow")}</span>
+              <span className="flex-1" />
+              <kbd className="rounded border border-line bg-side px-1.5 py-0.5 text-[10px] text-sub">
+                ⌘J
+              </kbd>
+            </Command.Item>
             <Command.Item
               value="cmd-newmd"
               onSelect={() => {

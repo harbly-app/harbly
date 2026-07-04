@@ -505,8 +505,7 @@ fn ai_runs_record_list_and_cleanup() {
             instruction: "改成深色".into(),
             status: "ok".into(),
             ver: Some(2),
-            report: None,
-            error: None,
+            ..Default::default()
         })
         .unwrap();
     assert_eq!(rec.status, "ok");
@@ -519,7 +518,7 @@ fn ai_runs_record_list_and_cleanup() {
         status: "ok".into(),
         ver: None,
         report: Some("# 报告\n一切正常".into()),
-        error: None,
+        ..Default::default()
     })
     .unwrap();
 
@@ -533,4 +532,156 @@ fn ai_runs_record_list_and_cleanup() {
     // Trashing the asset clears its run records too
     lib.trash_asset(&a.id).unwrap();
     assert!(lib.list_ai_runs(&a.id, 50).unwrap().is_empty());
+}
+
+#[test]
+fn ai_sessions_and_messages_roundtrip() {
+    let (_tmp, lib) = setup();
+
+    let s = lib.create_ai_session("claude", "", "medium").unwrap();
+    assert_eq!(s.title, "");
+
+    // First user message titles the session; appends bump activity order
+    lib.append_ai_message(&s.id, "user", "帮我完善这个文档，第一段更口语化", &[])
+        .unwrap();
+    lib.append_ai_message(
+        &s.id,
+        "assistant",
+        "已完善。",
+        &["read_asset a.html".to_string()],
+    )
+    .unwrap();
+    let msgs = lib.list_ai_messages(&s.id).unwrap();
+    assert_eq!(msgs.len(), 2);
+    assert_eq!(msgs[0].role, "user");
+    assert_eq!(msgs[1].actions, vec!["read_asset a.html".to_string()]);
+
+    let got = lib.get_ai_session(&s.id).unwrap().unwrap();
+    assert!(got.title.starts_with("帮我完善"));
+
+    // A second session becomes the most recent one
+    let s2 = lib
+        .create_ai_session("anthropic", "claude-sonnet-5", "high")
+        .unwrap();
+    let list = lib.list_ai_sessions(10).unwrap();
+    assert_eq!(list[0].id, s2.id);
+
+    // Prefs update; switching supply drops the foreign resume id
+    lib.set_ai_session_agent_id(&s.id, "abc-123").unwrap();
+    lib.set_ai_session_prefs(&s.id, "claude", "", "high")
+        .unwrap();
+    assert_eq!(
+        lib.get_ai_session(&s.id).unwrap().unwrap().agent_session_id,
+        Some("abc-123".to_string())
+    );
+    lib.set_ai_session_prefs(&s.id, "openai", "gpt-5.1", "")
+        .unwrap();
+    assert_eq!(
+        lib.get_ai_session(&s.id).unwrap().unwrap().agent_session_id,
+        None
+    );
+
+    // Delete: transcript gone, run back-links nulled, session list shrinks
+    lib.delete_ai_session(&s.id).unwrap();
+    assert!(lib.get_ai_session(&s.id).unwrap().is_none());
+    assert!(lib.list_ai_messages(&s.id).unwrap().is_empty());
+}
+
+#[test]
+fn ai_creates_new_asset() {
+    let (_tmp, lib) = setup();
+    let a = lib
+        .create_asset_from_ai(
+            "",
+            "合并结果",
+            "<!doctype html><html><title>合并</title></html>",
+        )
+        .unwrap();
+    assert_eq!(a.file_name, "合并结果.html");
+    assert_eq!(a.source, "ai");
+    assert_eq!(a.ver_count, 1);
+    // Name collision auto-suffixes; explicit .md keeps its type
+    let b = lib
+        .create_asset_from_ai("", "合并结果", "<html>2</html>")
+        .unwrap();
+    assert_eq!(b.file_name, "合并结果-2.html");
+    let c = lib
+        .create_asset_from_ai("笔记", "notes.md", "# hi")
+        .unwrap();
+    assert_eq!(c.rel_path, "笔记/notes.md");
+    assert_eq!(lib.search("合并").unwrap().len(), 2);
+}
+
+#[test]
+fn ai_tool_surface_reads_writes_and_records() {
+    let (_tmp, lib) = setup();
+    let root = lib.root().to_path_buf();
+    fs::write(root.join("pricing.html"), html("定价", "旧定价方案")).unwrap();
+    lib.scan(|_| {}).unwrap();
+    let a = lib.asset_by_rel("pricing.html").unwrap();
+    let s = lib
+        .create_ai_session("anthropic", "claude-sonnet-5", "")
+        .unwrap();
+    let ctx = harbly_core::AiToolCtx {
+        supply: "anthropic".into(),
+        model: "claude-sonnet-5".into(),
+        session_id: Some(s.id.clone()),
+    };
+
+    // search → read → write → create, all through the single tool entry point
+    let (v, w) = lib
+        .execute_ai_tool("search_library", &serde_json::json!({"query":"定价"}), &ctx)
+        .unwrap();
+    assert!(w.is_none());
+    assert_eq!(v["results"][0]["asset_id"], a.id.as_str());
+
+    let (v, _) = lib
+        .execute_ai_tool("read_asset", &serde_json::json!({"asset_id": a.id}), &ctx)
+        .unwrap();
+    assert!(v["content"].as_str().unwrap().contains("旧定价方案"));
+
+    let (v, w) = lib
+        .execute_ai_tool(
+            "write_asset",
+            &serde_json::json!({"asset_id": a.id, "content": html("定价", "新深色定价"), "summary": "换深色"}),
+            &ctx,
+        )
+        .unwrap();
+    assert_eq!(v["ver"], 2);
+    assert!(!w.as_ref().unwrap().created);
+    assert!(lib.read_asset_text(&a.id).unwrap().contains("新深色定价"));
+
+    let (v, w) = lib
+        .execute_ai_tool(
+            "create_asset",
+            &serde_json::json!({"name": "merged", "content": "<html><title>合并页</title></html>", "folder": ""}),
+            &ctx,
+        )
+        .unwrap();
+    assert_eq!(v["file_name"], "merged.html");
+    assert!(w.unwrap().created);
+
+    // Both writes recorded with session attribution; message link-up works
+    let runs = lib.list_ai_runs(&a.id, 10).unwrap();
+    assert_eq!(runs[0].kind, "revise");
+    assert_eq!(runs[0].session_id.as_deref(), Some(s.id.as_str()));
+    assert!(runs[0].message_id.is_none());
+    lib.link_runs_to_message(&s.id, "msg-1", 0).unwrap();
+    let runs = lib.list_ai_runs(&a.id, 10).unwrap();
+    assert_eq!(runs[0].message_id.as_deref(), Some("msg-1"));
+
+    // Guard rails: unknown tool, bad ids, traversal
+    assert!(lib
+        .execute_ai_tool("rm_rf", &serde_json::json!({}), &ctx)
+        .is_err());
+    assert!(lib
+        .execute_ai_tool("read_asset", &serde_json::json!({"asset_id":"nope"}), &ctx)
+        .is_err());
+    assert!(lib
+        .execute_ai_tool(
+            "create_asset",
+            &serde_json::json!({"name":"x","content":"y","folder":"../out"}),
+            &ctx
+        )
+        .is_err());
 }

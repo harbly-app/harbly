@@ -1523,6 +1523,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "harbly-mcp"
+version = "0.1.0"
+dependencies = [
+ "harbly-ai",
+ "harbly-core",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

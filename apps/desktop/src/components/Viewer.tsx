@@ -10,8 +10,6 @@ import type { AssetMeta } from "../lib/types";
 // Lazy: the Milkdown editor (and its Vue/CodeMirror runtime) only loads once a
 // Markdown file is actually opened, keeping HTML-only sessions lean.
 const MarkdownEditor = lazy(() => import("./MarkdownEditor"));
-// Lazy for the same reason: HTML-only browsing sessions never pay for the panel
-const AiPanel = lazy(() => import("./AiPanel"));
 
 /// Viewer embedded in the content area: file name and actions live in the window title bar (TitleBar),
 /// so this is just the preview itself — no second mini title bar
@@ -20,7 +18,6 @@ export default function Viewer() {
   const t = makeT(useStore((s) => s.lang));
   // While a drag is in progress, keep the iframe from eating mouse events so the ghost does not freeze over the preview area
   const dragging = useStore((s) => !!s.dragAsset);
-  const aiOpen = useStore((s) => s.aiOpen);
 
   // Keyboard: Esc returns to the grid · Up/Down switches between files in the same folder
   // (lives here, above the per-file remounts, so it is registered once)
@@ -62,30 +59,19 @@ export default function Viewer() {
   }, []);
 
   if (!a) return null;
-  // Content pane + optional AI panel share one row; `relative` anchors the
-  // panel's narrow-window overlay mode (styles.css .ai-panel)
-  return (
-    <div className="relative flex min-w-0 flex-1">
-      {isMd(a.fileName) ? (
-        // Markdown opens in the WYSIWYG editor; HTML in the sandboxed preview.
-        <Suspense
-          fallback={<div className="flex-1 bg-paper" aria-hidden="true" />}
-        >
-          <MarkdownEditor key={a.id} asset={a} />
-        </Suspense>
-      ) : (
-        // Keyed by file: switching files remounts and thereby restores the sandbox
-        <ViewerBody key={a.id} a={a} t={t} dragging={dragging} />
-      )}
-      {aiOpen && (
-        <Suspense
-          fallback={<div className="ai-panel shrink-0" aria-hidden="true" />}
-        >
-          <AiPanel key={`ai-${a.id}`} asset={a} />
-        </Suspense>
-      )}
-    </div>
-  );
+  // Markdown opens in the WYSIWYG editor; HTML in the sandboxed preview.
+  // (The AI panel lives one level up, in App — it is library-scoped now.)
+  if (isMd(a.fileName)) {
+    return (
+      <Suspense
+        fallback={<div className="flex-1 bg-paper" aria-hidden="true" />}
+      >
+        <MarkdownEditor key={a.id} asset={a} />
+      </Suspense>
+    );
+  }
+  // Keyed by file: switching files remounts and thereby restores the sandbox
+  return <ViewerBody key={a.id} a={a} t={t} dragging={dragging} />;
 }
 
 function ViewerBody({

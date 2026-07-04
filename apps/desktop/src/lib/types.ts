@@ -97,6 +97,31 @@ export interface AiConfig {
 export type AiEvent =
   { type: "delta"; text: string } | { type: "action"; label: string };
 
+/** "" = provider default */
+export type AiEffort = "" | "low" | "medium" | "high";
+
+export interface AiSession {
+  id: string;
+  /** Auto-filled from the first user message when empty */
+  title: string;
+  supply: AiSupply;
+  model: string;
+  effort: AiEffort;
+  agentSessionId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AiMessage {
+  id: string;
+  sessionId: string;
+  role: "user" | "assistant";
+  content: string;
+  /** Tool-activity labels shown above the assistant text */
+  actions: string[];
+  createdAt: number;
+}
+
 export interface AiRun {
   id: string;
   assetId: string;
@@ -109,6 +134,8 @@ export interface AiRun {
   ver: number | null;
   report: string | null;
   error: string | null;
+  sessionId: string | null;
+  messageId: string | null;
   createdAt: number;
 }
 

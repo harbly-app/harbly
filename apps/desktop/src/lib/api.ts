@@ -3,7 +3,9 @@ import type {
   AgentInfo,
   AiConfig,
   AiEvent,
+  AiMessage,
   AiRun,
+  AiSession,
   AssetMeta,
   ImportResult,
   ScanSummary,
@@ -98,21 +100,37 @@ export const api = {
   aiRunsList: (id: string, limit?: number) =>
     invoke<AiRun[]>("ai_runs_list", { id, limit: limit ?? null }),
   aiCancel: (job: string) => invoke<null>("ai_cancel", { job }),
-  /** Long-running: resolves when the task finishes; progress streams via `onEvent`.
-   * No task kind — intent is routed by the model, outcome classified by diff. */
-  aiRun: (
+  // Sessions
+  aiSessionsList: () => invoke<AiSession[]>("ai_sessions_list"),
+  aiSessionCreate: (supply: string, model: string, effort: string) =>
+    invoke<AiSession>("ai_session_create", { supply, model, effort }),
+  aiSessionDelete: (id: string) => invoke<null>("ai_session_delete", { id }),
+  aiSessionSetPrefs: (
+    id: string,
+    supply: string,
+    model: string,
+    effort: string,
+  ) => invoke<null>("ai_session_set_prefs", { id, supply, model, effort }),
+  aiSessionMessages: (id: string) =>
+    invoke<AiMessage[]>("ai_session_messages", { id }),
+  /** One conversation turn: resolves with the assistant message when the turn
+   * finishes; progress (text deltas + tool actions) streams via `onEvent`. */
+  aiSend: (
     args: {
       job: string;
-      id: string;
-      instruction: string;
-      supply: string;
-      model?: string;
+      sessionId: string;
+      text: string;
+      currentAssetId?: string | null;
     },
     onEvent: (e: AiEvent) => void,
   ) => {
     const ch = new Channel<AiEvent>();
     ch.onmessage = onEvent;
-    return invoke<AiRun>("ai_run", { ...args, onEvent: ch });
+    return invoke<AiMessage>("ai_send", {
+      ...args,
+      currentAssetId: args.currentAssetId ?? null,
+      onEvent: ch,
+    });
   },
 };
 

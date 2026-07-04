@@ -1,0 +1,13 @@
+[package]
+name = "harbly-mcp"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+harbly-ai = { path = "../harbly-ai" }
+harbly-core = { path = "../harbly-core" }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

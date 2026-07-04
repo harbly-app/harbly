@@ -1,10 +1,14 @@
 import {
   ArrowUp,
+  Check,
   ChevronDown,
-  CircleAlert,
   FileDiff,
+  History,
+  Plus,
+  Settings2,
   Sparkles,
   Square,
+  Trash2,
   Undo2,
   X,
 } from "lucide-react";
@@ -16,13 +20,16 @@ import { useStore } from "../lib/store";
 import type {
   AgentInfo,
   AiConfig,
+  AiEffort,
+  AiMessage,
   AiRun,
+  AiSession,
   AiSupply,
-  AssetMeta,
+  ByokProvider,
   VersionInfo,
 } from "../lib/types";
 
-/** One selectable supply in the header dropdown */
+/** One selectable supply in the prefs popover */
 interface SupplyOption {
   id: AiSupply;
   label: string;
@@ -36,11 +43,14 @@ interface LiveRun {
   text: string;
 }
 
-/** Timeline row: a version (optionally produced by an AI run) or a standalone
- * run (review report / failure). Sorted oldest→newest, chat-like. */
-type TimelineItem =
-  | { t: "ver"; time: number; ver: VersionInfo; run?: AiRun }
-  | { t: "run"; time: number; run: AiRun };
+/** Draft prefs for a not-yet-created conversation */
+interface Prefs {
+  supply: AiSupply | null;
+  model: string;
+  effort: AiEffort;
+}
+
+const LAST_SESSION_KEY = "harbly.aiSession";
 
 function supplyLabel(id: AiSupply): string {
   switch (id) {
@@ -72,44 +82,46 @@ function buildOptions(
   return out;
 }
 
-function mergeTimeline(versions: VersionInfo[], runs: AiRun[]): TimelineItem[] {
-  const byVer = new Map<number, AiRun>();
-  const standalone: AiRun[] = [];
-  for (const r of runs) {
-    if (r.kind === "revise" && r.status === "ok" && r.ver != null)
-      byVer.set(r.ver, r);
-    else standalone.push(r);
-  }
-  const items: TimelineItem[] = versions.map((v) => ({
-    t: "ver",
-    time: v.createdAt,
-    ver: v,
-    run: byVer.get(v.ver),
-  }));
-  for (const r of standalone)
-    items.push({ t: "run", time: r.createdAt, run: r });
-  return items.sort((a, b) => a.time - b.time);
-}
-
-export default function AiPanel({ asset }: { asset: AssetMeta }) {
+/** The AI panel: a library-scoped conversation host. Sessions persist in the
+ * library; the currently open file rides along as context. All file access
+ * happens through the shared tool surface, so every write in a transcript is
+ * a version somewhere. */
+export default function AiPanel() {
   const t = makeT(useStore((s) => s.lang));
   const toggleAi = useStore((s) => s.toggleAi);
   const showToast = useStore((s) => s.showToast);
+  const viewerAsset = useStore((s) => s.viewerAsset);
+  const aiConfigEpoch = useStore((s) => s.aiConfigEpoch);
 
   const [options, setOptions] = useState<SupplyOption[] | null>(null);
   const [config, setConfig] = useState<AiConfig>({});
-  const [supply, setSupply] = useState<AiSupply | null>(null);
-  const [versions, setVersions] = useState<VersionInfo[]>([]);
-  const [runs, setRuns] = useState<AiRun[]>([]);
+  const [sessions, setSessions] = useState<AiSession[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(() =>
+    localStorage.getItem(LAST_SESSION_KEY),
+  );
+  const [messages, setMessages] = useState<AiMessage[]>([]);
+  const [draft, setDraft] = useState<Prefs>({
+    supply: null,
+    model: "",
+    effort: "",
+  });
   const [input, setInput] = useState("");
   const [live, setLive] = useState<LiveRun | null>(null);
-  const [result, setResult] = useState<AiRun | null>(null);
+  const [menu, setMenu] = useState<"none" | "sessions" | "prefs" | "versions">(
+    "none",
+  );
+  const [versions, setVersions] = useState<VersionInfo[]>([]);
+  const [runs, setRuns] = useState<AiRun[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef<LiveRun | null>(null);
 
-  // Supplies: detected agents + configured keys, ordered local-first.
-  // Re-probed each time the panel mounts (cheap; keeps state honest after the
-  // user installs a CLI or saves a key in settings).
+  const active = sessions.find((s) => s.id === activeId) ?? null;
+  // Effective prefs: the active session's, or the draft's for a new one
+  const prefs: Prefs = active
+    ? { supply: active.supply, model: active.model, effort: active.effort }
+    : draft;
+  const empty = options !== null && options.length === 0;
+
   const loadSupplies = useCallback(() => {
     return Promise.all([
       api.aiDetectAgents().catch((): AgentInfo[] => []),
@@ -119,73 +131,160 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
       const opts = buildOptions(agents, keys);
       setOptions(opts);
       setConfig(cfg);
-      setSupply((cur) => {
-        const want = cur ?? cfg.supply ?? null;
-        return want != null && opts.some((o) => o.id === want)
-          ? want
-          : (opts[0]?.id ?? null);
+      setDraft((d) => {
+        const want = d.supply ?? cfg.supply ?? null;
+        const supply =
+          want != null && opts.some((o) => o.id === want)
+            ? want
+            : (opts[0]?.id ?? null);
+        return { ...d, supply };
       });
     });
   }, []);
 
-  const loadTimeline = useCallback(() => {
-    return Promise.all([
-      api.listVersions(asset.id).catch(() => [] as VersionInfo[]),
-      api.aiRunsList(asset.id).catch(() => [] as AiRun[]),
-    ]).then(([vs, rs]) => {
+  const loadSessions = useCallback(() => {
+    return api
+      .aiSessionsList()
+      .then(setSessions)
+      .catch(() => {});
+  }, []);
+
+  const loadMessages = useCallback((id: string | null) => {
+    const fetching: Promise<AiMessage[]> = id
+      ? api.aiSessionMessages(id).catch((): AiMessage[] => [])
+      : Promise.resolve([]);
+    void fetching.then(setMessages);
+  }, []);
+
+  // Versions + runs of the file being viewed: feeds the history popover and
+  // the per-message version cards
+  const loadAssetMeta = useCallback(() => {
+    const id = viewerAsset?.id;
+    const fetching: Promise<[VersionInfo[], AiRun[]]> = id
+      ? Promise.all([
+          api.listVersions(id).catch((): VersionInfo[] => []),
+          api.aiRunsList(id).catch((): AiRun[] => []),
+        ])
+      : Promise.resolve([[], []]);
+    void fetching.then(([vs, rs]) => {
       setVersions(vs);
       setRuns(rs);
     });
-  }, [asset.id]);
+  }, [viewerAsset]);
 
-  const aiConfigEpoch = useStore((s) => s.aiConfigEpoch);
   useEffect(() => {
     void loadSupplies();
   }, [loadSupplies, aiConfigEpoch]);
 
-  // currentHash changes on every content write (AI, rollback, external edit) —
-  // exactly when the version chain may have grown.
   useEffect(() => {
-    void loadTimeline();
-  }, [loadTimeline, asset.currentHash]);
+    void loadSessions();
+  }, [loadSessions]);
+
+  useEffect(() => {
+    loadMessages(activeId);
+  }, [loadMessages, activeId]);
+
+  useEffect(() => {
+    loadAssetMeta();
+  }, [loadAssetMeta]);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [versions, runs, live?.text, live?.actions.length, result]);
+  }, [messages, live?.text, live?.actions.length]);
 
-  // A run outlives the panel (user may close it or switch files): cancel is
-  // explicit-only, but drop the local live state on unmount.
   useEffect(() => {
     liveRef.current = live;
   }, [live]);
 
-  const pickSupply = (id: AiSupply) => {
-    setSupply(id);
-    const next = { ...config, supply: id };
-    setConfig(next);
-    api.aiSetConfig(next).catch(() => {});
+  const switchSession = (id: string | null) => {
+    setActiveId(id);
+    setMenu("none");
+    if (id) localStorage.setItem(LAST_SESSION_KEY, id);
+    else localStorage.removeItem(LAST_SESSION_KEY);
   };
 
-  // One send path for everything: change requests, questions, reviews. The
-  // model routes intent; the backend classifies the outcome by diff.
-  const send = async () => {
-    if (live || !supply) return;
-    const instruction = input.trim();
-    if (!instruction) return;
-    const job = crypto.randomUUID();
-    setResult(null);
-    setInput("");
-    setLive({ job, instruction, actions: [], text: "" });
+  const deleteSession = async (id: string) => {
     try {
-      const record = await api.aiRun(
+      await api.aiSessionDelete(id);
+      if (id === activeId) switchSession(null);
+      await loadSessions();
+    } catch (e) {
+      showToast(String(e));
+    }
+  };
+
+  const updatePrefs = (next: Prefs) => {
+    if (active) {
+      setSessions((list) =>
+        list.map((s) =>
+          s.id === active.id
+            ? {
+                ...s,
+                supply: next.supply ?? s.supply,
+                model: next.model,
+                effort: next.effort,
+              }
+            : s,
+        ),
+      );
+      if (next.supply) {
+        api
+          .aiSessionSetPrefs(active.id, next.supply, next.model, next.effort)
+          .catch(() => {});
+      }
+    } else {
+      setDraft(next);
+      // A draft's supply choice becomes the default for future conversations
+      if (next.supply && next.supply !== config.supply) {
+        const cfg = { ...config, supply: next.supply };
+        setConfig(cfg);
+        api.aiSetConfig(cfg).catch(() => {});
+      }
+    }
+  };
+
+  const send = async () => {
+    const text = input.trim();
+    if (live || !text || !prefs.supply) return;
+    let sessionId = activeId;
+    try {
+      if (!sessionId) {
+        const s = await api.aiSessionCreate(
+          prefs.supply,
+          prefs.model,
+          prefs.effort,
+        );
+        setSessions((list) => [s, ...list]);
+        sessionId = s.id;
+        switchSession(s.id);
+      }
+    } catch (e) {
+      showToast(String(e));
+      return;
+    }
+    const job = crypto.randomUUID();
+    setInput("");
+    // Optimistic user turn; replaced by the authoritative list after the turn
+    setMessages((m) => [
+      ...m,
+      {
+        id: `local-${job}`,
+        sessionId,
+        role: "user",
+        content: text,
+        actions: [],
+        createdAt: Math.floor(Date.now() / 1000),
+      },
+    ]);
+    setLive({ job, instruction: text, actions: [], text: "" });
+    try {
+      await api.aiSend(
         {
           job,
-          id: asset.id,
-          instruction,
-          supply,
-          model:
-            config.models?.[supply as "anthropic" | "openai" | "openrouter"],
+          sessionId,
+          text,
+          currentAssetId: viewerAsset?.id ?? null,
         },
         (e) => {
           setLive((l) => {
@@ -198,11 +297,13 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
           });
         },
       );
-      setResult(record);
-      await loadTimeline();
+      loadMessages(sessionId);
+      loadAssetMeta();
+      void loadSessions();
     } catch (e) {
       showToast(localizeAiError(String(e)));
-      setInput(instruction);
+      setInput(text);
+      loadMessages(sessionId);
     } finally {
       setLive((l) => (l?.job === job ? null : l));
     }
@@ -214,9 +315,9 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
   };
 
   const rollback = async (toVer: number) => {
+    if (!viewerAsset) return;
     try {
-      await api.restoreVersion(asset.id, toVer);
-      setResult(null);
+      await api.restoreVersion(viewerAsset.id, toVer);
       showToast(t("aiRolledBack", { n: toVer }));
     } catch (e) {
       showToast(String(e));
@@ -224,88 +325,146 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
   };
 
   const openDiff = (toVer: number) => {
+    if (!viewerAsset) return;
+    setMenu("none");
     useStore.getState().setModal({
       kind: "aiDiff",
-      asset,
+      asset: viewerAsset,
       fromVer: toVer > 1 ? toVer - 1 : null,
       toVer,
     });
   };
 
+  // Version cards under the assistant message that produced them (only for
+  // the file currently open — cross-file writes stay visible as action rows)
+  const runsByMessage = new Map<string, AiRun[]>();
+  for (const r of runs) {
+    if (r.messageId && r.ver != null && r.status === "ok") {
+      const list = runsByMessage.get(r.messageId) ?? [];
+      list.push(r);
+      runsByMessage.set(r.messageId, list);
+    }
+  }
   const latestVer = versions.length ? versions[0].ver : 0;
-  const timeline = mergeTimeline(versions, runs);
-  const empty = options !== null && options.length === 0;
 
   return (
     <aside className="ai-panel relative z-[5] flex shrink-0 flex-col border-l border-line bg-paper">
-      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
-        <Sparkles className="h-4 w-4 text-primary" />
-        <span className="text-[13px] font-extrabold">AI</span>
-        <div className="flex-1" />
-        {options && options.length > 0 && (
-          <div className="relative flex h-6 items-center rounded-full border border-line bg-side pr-1.5 pl-2.5 text-[11px] text-sub2">
-            <select
-              value={supply ?? undefined}
-              onChange={(e) => pickSupply(e.target.value as AiSupply)}
-              className="max-w-[150px] cursor-pointer appearance-none truncate bg-transparent pr-4 outline-none"
-              aria-label={t("aiSupply")}
-            >
-              {options.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.label}
-                  {o.local ? ` · ${t("aiSupplyLocal")}` : ""}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-1.5 h-3 w-3" />
-          </div>
+      <header className="flex h-10 shrink-0 items-center gap-1.5 border-b border-line px-2.5">
+        <Sparkles className="h-4 w-4 shrink-0 text-primary" />
+        <button
+          onClick={() => setMenu(menu === "sessions" ? "none" : "sessions")}
+          className="flex h-7 min-w-0 flex-1 items-center gap-1 rounded-ctl px-1.5 text-left transition hover:bg-side"
+          title={t("aiSessions")}
+        >
+          <span className="min-w-0 flex-1 truncate text-xs font-bold">
+            {active ? active.title || t("aiNewSession") : t("aiNewSession")}
+          </span>
+          <ChevronDown className="h-3 w-3 shrink-0 text-sub" />
+        </button>
+        <button
+          onClick={() => switchSession(null)}
+          title={t("aiNewSession")}
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+        {viewerAsset && versions.length > 0 && (
+          <button
+            onClick={() => setMenu(menu === "versions" ? "none" : "versions")}
+            title={t("aiVersionsTitle")}
+            className={`flex h-6 shrink-0 items-center gap-1 rounded-full border px-2 text-[10.5px] font-bold transition ${
+              menu === "versions"
+                ? "border-primary/40 bg-primary/10 text-primary"
+                : "border-line bg-side text-sub2 hover:border-primary/40"
+            }`}
+          >
+            <History className="h-3 w-3" />v{latestVer}
+          </button>
         )}
+        <button
+          onClick={() => setMenu(menu === "prefs" ? "none" : "prefs")}
+          title={t("aiSupply")}
+          className={`grid h-6 w-6 shrink-0 place-items-center rounded-ctl transition ${
+            menu === "prefs"
+              ? "bg-primary/10 text-primary"
+              : "text-sub hover:bg-side hover:text-ink"
+          }`}
+        >
+          <Settings2 className="h-3.5 w-3.5" />
+        </button>
         <button
           onClick={toggleAi}
           title={`${t("aiPanelHide")} (⌘J)`}
-          className="grid h-6 w-6 place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
         >
           <X className="h-3.5 w-3.5" />
         </button>
       </header>
 
+      {menu !== "none" && (
+        <button
+          aria-label="close menu"
+          onClick={() => setMenu("none")}
+          className="fixed inset-0 z-10 cursor-default"
+          tabIndex={-1}
+        />
+      )}
+      {menu === "sessions" && (
+        <SessionMenu
+          t={t}
+          sessions={sessions}
+          activeId={activeId}
+          onPick={switchSession}
+          onDelete={(id) => void deleteSession(id)}
+        />
+      )}
+      {menu === "prefs" && (
+        <PrefsMenu
+          t={t}
+          options={options ?? []}
+          prefs={prefs}
+          onChange={updatePrefs}
+        />
+      )}
+      {menu === "versions" && (
+        <VersionsMenu
+          t={t}
+          versions={versions}
+          runs={runs}
+          latestVer={latestVer}
+          onDiff={openDiff}
+          onRollback={(v) => void rollback(v)}
+        />
+      )}
+
       {empty ? (
         <EmptyState t={t} />
       ) : (
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-3">
-          <div className="flex flex-col gap-2">
-            {timeline.map((item) =>
-              item.t === "ver" ? (
-                <VersionRow
-                  key={`v${item.ver.ver}`}
-                  item={item}
-                  t={t}
-                  isLatest={item.ver.ver === latestVer}
-                  onDiff={() => openDiff(item.ver.ver)}
-                  onRollback={() => void rollback(item.ver.ver)}
-                />
-              ) : (
-                <RunRow key={item.run.id} run={item.run} t={t} />
-              ),
-            )}
-            {live && <LiveBlock live={live} t={t} />}
-            {result && (
-              <ResultCard
-                result={result}
+          <div className="flex flex-col gap-2.5">
+            {messages.map((m) => (
+              <MessageRow
+                key={m.id}
+                m={m}
                 t={t}
-                onDiff={() => result.ver != null && openDiff(result.ver)}
-                onRollback={() =>
-                  result.ver != null &&
-                  result.ver > 1 &&
-                  void rollback(result.ver - 1)
-                }
+                writes={runsByMessage.get(m.id) ?? []}
+                latestVer={latestVer}
+                onDiff={openDiff}
+                onRollback={(v) => void rollback(v)}
               />
-            )}
+            ))}
+            {live && <LiveBlock live={live} t={t} />}
           </div>
         </div>
       )}
 
       <footer className="shrink-0 border-t border-line p-3">
+        {viewerAsset && (
+          <div className="mb-1.5 flex items-center gap-1 text-[10.5px] text-sub">
+            <span className="h-1 w-1 rounded-full bg-primary/60" />
+            {t("aiAttached", { name: viewerAsset.fileName })}
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <textarea
             value={input}
@@ -322,7 +481,11 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
             }}
             rows={2}
             disabled={!!live || empty}
-            placeholder={t("aiPlaceholder", { name: asset.fileName })}
+            placeholder={
+              viewerAsset
+                ? t("aiPlaceholder", { name: viewerAsset.fileName })
+                : t("aiPlaceholderGlobal")
+            }
             className="max-h-32 min-h-[38px] flex-1 resize-none rounded-ctl border border-line bg-side px-2.5 py-2 text-xs outline-none placeholder:text-sub focus:border-primary disabled:opacity-50"
           />
           {live ? (
@@ -336,7 +499,7 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
           ) : (
             <button
               onClick={() => void send()}
-              disabled={empty || !supply || !input.trim()}
+              disabled={empty || !prefs.supply || !input.trim()}
               title={t("aiSend")}
               className="grid h-8 w-8 shrink-0 place-items-center rounded-ctl bg-primary text-white transition hover:bg-primary-light disabled:opacity-35"
             >
@@ -346,6 +509,222 @@ export default function AiPanel({ asset }: { asset: AssetMeta }) {
         </div>
       </footer>
     </aside>
+  );
+}
+
+function MenuShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="absolute top-10 right-2 left-2 z-20 max-h-[60%] overflow-y-auto rounded-xl border border-line bg-card p-1.5 shadow-xl">
+      {children}
+    </div>
+  );
+}
+
+function SessionMenu({
+  t,
+  sessions,
+  activeId,
+  onPick,
+  onDelete,
+}: {
+  t: TFn;
+  sessions: AiSession[];
+  activeId: string | null;
+  onPick: (id: string | null) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <MenuShell>
+      <button
+        onClick={() => onPick(null)}
+        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-bold text-primary transition hover:bg-primary/10"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        {t("aiNewSession")}
+      </button>
+      {sessions.map((s) => (
+        <div
+          key={s.id}
+          className={`group flex items-center gap-2 rounded-lg px-2.5 py-1.5 transition hover:bg-side ${
+            s.id === activeId ? "bg-primary/8" : ""
+          }`}
+        >
+          <button
+            onClick={() => onPick(s.id)}
+            className="min-w-0 flex-1 text-left"
+          >
+            <div className="truncate text-xs">
+              {s.title || t("aiNewSession")}
+            </div>
+            <div className="text-[10px] text-sub">
+              {supplyLabel(s.supply)} · {timeAgo(s.updatedAt)}
+            </div>
+          </button>
+          {s.id === activeId && (
+            <Check className="h-3 w-3 shrink-0 text-primary" />
+          )}
+          <button
+            onClick={() => onDelete(s.id)}
+            title={t("aiDeleteSession")}
+            className="hidden h-5 w-5 shrink-0 place-items-center rounded text-sub transition group-hover:grid hover:bg-card hover:text-danger"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </div>
+      ))}
+    </MenuShell>
+  );
+}
+
+/** Model/effort defaults shown as placeholders — empty means backend default */
+const BYOK_DEFAULT_MODEL: Record<ByokProvider, string> = {
+  anthropic: "claude-sonnet-5",
+  openai: "gpt-5.1",
+  openrouter: "anthropic/claude-sonnet-5",
+};
+
+function PrefsMenu({
+  t,
+  options,
+  prefs,
+  onChange,
+}: {
+  t: TFn;
+  options: SupplyOption[];
+  prefs: Prefs;
+  onChange: (p: Prefs) => void;
+}) {
+  const effortChoices: { v: AiEffort; label: string }[] = [
+    { v: "", label: t("aiEffortDefault") },
+    { v: "low", label: t("aiEffortLow") },
+    { v: "medium", label: t("aiEffortMedium") },
+    { v: "high", label: t("aiEffortHigh") },
+  ];
+  // Claude Code has no effort knob; everyone else maps it natively
+  const effortSupported = prefs.supply !== "claude";
+  const modelPlaceholder =
+    prefs.supply && prefs.supply in BYOK_DEFAULT_MODEL
+      ? BYOK_DEFAULT_MODEL[prefs.supply as ByokProvider]
+      : t("aiModelDefault");
+
+  return (
+    <MenuShell>
+      <div className="px-2.5 pt-1.5 pb-1 text-[10.5px] font-bold text-sub">
+        {t("aiSupply")}
+      </div>
+      {options.map((o) => (
+        <button
+          key={o.id}
+          onClick={() => onChange({ ...prefs, supply: o.id, model: "" })}
+          className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition hover:bg-side ${
+            prefs.supply === o.id ? "font-bold text-primary" : ""
+          }`}
+        >
+          <span className="min-w-0 flex-1 truncate text-left">
+            {o.label}
+            {o.local ? ` · ${t("aiSupplyLocal")}` : ""}
+          </span>
+          {prefs.supply === o.id && <Check className="h-3 w-3 shrink-0" />}
+        </button>
+      ))}
+      <div className="px-2.5 pt-2 pb-1 text-[10.5px] font-bold text-sub">
+        {t("aiModelLabel")}
+      </div>
+      <div className="px-2.5 pb-1.5">
+        <input
+          value={prefs.model}
+          onChange={(e) => onChange({ ...prefs, model: e.target.value })}
+          placeholder={modelPlaceholder}
+          className="h-7 w-full rounded-ctl border border-line bg-side px-2 text-[11px] outline-none focus:border-primary"
+        />
+      </div>
+      {effortSupported && (
+        <>
+          <div className="px-2.5 pt-1 pb-1 text-[10.5px] font-bold text-sub">
+            Effort
+          </div>
+          <div className="flex gap-1 px-2.5 pb-2">
+            {effortChoices.map((c) => (
+              <button
+                key={c.v}
+                onClick={() => onChange({ ...prefs, effort: c.v })}
+                className={`h-6 flex-1 rounded-ctl border text-[10.5px] transition ${
+                  prefs.effort === c.v
+                    ? "border-primary bg-primary/10 font-bold text-primary"
+                    : "border-line bg-side text-sub2 hover:border-primary/40"
+                }`}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </MenuShell>
+  );
+}
+
+function VersionsMenu({
+  t,
+  versions,
+  runs,
+  latestVer,
+  onDiff,
+  onRollback,
+}: {
+  t: TFn;
+  versions: VersionInfo[];
+  runs: AiRun[];
+  latestVer: number;
+  onDiff: (v: number) => void;
+  onRollback: (v: number) => void;
+}) {
+  const instructionOf = (ver: number) =>
+    runs.find((r) => r.ver === ver && r.status === "ok")?.instruction ?? "";
+  return (
+    <MenuShell>
+      <div className="px-2.5 pt-1.5 pb-1 text-[10.5px] font-bold text-sub">
+        {t("aiVersionsTitle")}
+      </div>
+      {versions.map((v) => (
+        <div
+          key={v.ver}
+          className="group flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[11px] transition hover:bg-side"
+        >
+          <span
+            className={`shrink-0 font-bold ${v.ver === latestVer ? "text-primary" : "text-sub2"}`}
+          >
+            v{v.ver}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-sub">
+            {instructionOf(v.ver) || localizeVerLabel(v.label, t)}
+          </span>
+          <span className="shrink-0 text-[10px] text-sub">
+            {timeAgo(v.createdAt)}
+          </span>
+          <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+            {v.ver > 1 && (
+              <button
+                onClick={() => onDiff(v.ver)}
+                title={t("aiViewDiff")}
+                className="grid h-5 w-5 place-items-center rounded text-sub transition hover:bg-card hover:text-ink"
+              >
+                <FileDiff className="h-3 w-3" />
+              </button>
+            )}
+            {v.ver !== latestVer && (
+              <button
+                onClick={() => onRollback(v.ver)}
+                title={t("aiRollbackTo", { n: v.ver })}
+                className="grid h-5 w-5 place-items-center rounded text-sub transition hover:bg-card hover:text-ink"
+              >
+                <Undo2 className="h-3 w-3" />
+              </button>
+            )}
+          </span>
+        </div>
+      ))}
+    </MenuShell>
   );
 }
 
@@ -366,204 +745,104 @@ function EmptyState({ t }: { t: TFn }) {
   );
 }
 
-function VersionRow({
-  item,
+function MessageRow({
+  m,
   t,
-  isLatest,
+  writes,
+  latestVer,
   onDiff,
   onRollback,
 }: {
-  item: { ver: VersionInfo; run?: AiRun };
+  m: AiMessage;
   t: TFn;
-  isLatest: boolean;
-  onDiff: () => void;
-  onRollback: () => void;
+  writes: AiRun[];
+  latestVer: number;
+  onDiff: (v: number) => void;
+  onRollback: (v: number) => void;
 }) {
-  const { ver, run } = item;
-  return (
-    <div className="group">
-      <div className="flex items-center gap-2 text-[11px] text-sub">
-        <span
-          className={`h-[5px] w-[5px] shrink-0 rounded-full ${isLatest ? "bg-primary" : "bg-line-strong"}`}
-        />
-        <span
-          className={`shrink-0 font-bold ${isLatest ? "text-primary" : ""}`}
-        >
-          v{ver.ver}
-        </span>
-        <span className="truncate">{localizeVerLabel(ver.label, t)}</span>
-        <span className="ml-auto shrink-0">{timeAgo(ver.createdAt)}</span>
-        <span className="hidden shrink-0 items-center gap-1 group-hover:flex">
-          {ver.ver > 1 && (
-            <button
-              onClick={onDiff}
-              title={t("aiViewDiff")}
-              className="grid h-5 w-5 place-items-center rounded text-sub transition hover:bg-side hover:text-ink"
-            >
-              <FileDiff className="h-3 w-3" />
-            </button>
-          )}
-          {!isLatest && (
-            <button
-              onClick={onRollback}
-              title={t("aiRollbackTo", { n: ver.ver })}
-              className="grid h-5 w-5 place-items-center rounded text-sub transition hover:bg-side hover:text-ink"
-            >
-              <Undo2 className="h-3 w-3" />
-            </button>
-          )}
-        </span>
-      </div>
-      {run && (
-        <div className="mt-1 ml-[13px] rounded-ctl bg-side px-2.5 py-1.5 text-xs leading-relaxed text-sub2">
-          {run.instruction}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RunRow({ run, t }: { run: AiRun; t: TFn }) {
-  // Any successful textual reply renders as a card: answers, reviews, and
-  // legacy "review" records all share this shape.
-  if (run.status === "ok" && run.report) {
+  if (m.role === "user") {
     return (
-      <div className="rounded-ctl border border-line bg-card px-3 py-2.5">
-        <div className="mb-1.5 flex items-start gap-1.5 text-[11px] font-bold text-primary">
-          <Sparkles className="mt-0.5 h-3 w-3 shrink-0" />
-          <span className="line-clamp-2 min-w-0 flex-1">
-            {run.instruction.trim() || t("aiReportTitle")}
-          </span>
-          <span className="shrink-0 font-normal text-sub">
-            {timeAgo(run.createdAt)}
-          </span>
-        </div>
-        <div className="max-h-64 overflow-y-auto text-xs leading-relaxed whitespace-pre-wrap text-sub2 select-text">
-          {run.report}
-        </div>
+      <div className="ml-6 rounded-ctl bg-primary/8 px-2.5 py-1.5 text-xs leading-relaxed whitespace-pre-wrap select-text">
+        {m.content}
       </div>
     );
   }
-  // Failed / cancelled / no-change runs: one muted line each
-  const text =
-    run.status === "cancelled"
-      ? t("aiCancelledLine")
-      : run.status === "error"
-        ? localizeAiError(run.error ?? "")
-        : t("aiNoChange");
   return (
-    <div className="flex items-start gap-2 text-[11px] text-sub">
-      <CircleAlert
-        className={`mt-0.5 h-3 w-3 shrink-0 ${run.status === "error" ? "text-danger" : ""}`}
-      />
-      <span className="min-w-0 flex-1">
-        {run.instruction && (
-          <span className="mr-1.5 text-sub2">「{run.instruction}」</span>
-        )}
-        {text}
-      </span>
-      <span className="shrink-0">{timeAgo(run.createdAt)}</span>
+    <div className="mr-2">
+      {m.actions.length > 0 && (
+        <div className="mb-1 flex flex-col gap-0.5">
+          {m.actions.map((a, i) => (
+            <div
+              key={`${a}${i}`}
+              className="flex items-center gap-1.5 text-[10.5px] text-sub"
+            >
+              <span className="h-1 w-1 shrink-0 rounded-full bg-primary/60" />
+              <span className="truncate font-mono">{a}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="text-xs leading-relaxed whitespace-pre-wrap select-text">
+        {m.content}
+      </div>
+      {writes.map((w) => (
+        <div
+          key={w.id}
+          className="mt-1.5 rounded-ctl border border-primary/25 bg-primary/8 px-2.5 py-2"
+        >
+          <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-primary">
+            <Sparkles className="h-3 w-3" />
+            {t("aiGeneratedVer", { n: w.ver ?? 0 })}
+          </div>
+          <div className="mt-1.5 flex gap-1.5">
+            <button
+              onClick={() => w.ver != null && onDiff(w.ver)}
+              className="h-6 rounded-ctl border border-primary/30 bg-card px-2 text-[10.5px] font-bold text-primary transition hover:bg-primary hover:text-white"
+            >
+              {t("aiViewDiff")}
+            </button>
+            {w.ver != null && w.ver > 1 && w.ver === latestVer && (
+              <button
+                onClick={() => {
+                  if (w.ver != null) onRollback(w.ver - 1);
+                }}
+                className="h-6 rounded-ctl border border-line bg-card px-2 text-[10.5px] text-sub2 transition hover:border-primary/40"
+              >
+                {t("aiRollback")}
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
 function LiveBlock({ live, t }: { live: LiveRun; t: TFn }) {
-  // Show only the streaming tail: a full HTML rewrite would flood the panel
+  // Show only the streaming tail — long replies scroll, they don't flood
   const tail = live.text.length > 600 ? `…${live.text.slice(-600)}` : live.text;
   return (
-    <div>
-      {live.instruction && (
-        <div className="rounded-ctl bg-primary/8 px-2.5 py-1.5 text-xs leading-relaxed text-ink">
-          {live.instruction}
-        </div>
-      )}
-      <div className="mt-1.5 flex flex-col gap-1">
-        {live.actions.slice(-5).map((a, i) => (
+    <div className="mr-2">
+      <div className="flex flex-col gap-0.5">
+        {live.actions.slice(-6).map((a, i) => (
           <div
             key={`${a}${i}`}
-            className="flex items-center gap-1.5 text-[11px] text-sub"
+            className="flex items-center gap-1.5 text-[10.5px] text-sub"
           >
             <span className="h-1 w-1 shrink-0 rounded-full bg-primary/60" />
             <span className="truncate font-mono">{a}</span>
           </div>
         ))}
       </div>
-      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-sub">
+      <div className="mt-1 flex items-center gap-1.5 text-[11px] text-sub">
         <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-[1.5px] border-primary/30 border-t-primary" />
         {t("aiRunning")}
-        {live.text && (
-          <span className="text-sub/70">
-            {t("aiCharsStreamed", { n: live.text.length })}
-          </span>
-        )}
       </div>
       {tail && (
-        <pre className="mt-1.5 max-h-28 overflow-hidden rounded-ctl bg-side px-2.5 py-2 font-mono text-[10.5px] leading-relaxed break-all whitespace-pre-wrap text-sub">
+        <div className="mt-1 text-xs leading-relaxed whitespace-pre-wrap text-sub2">
           {tail}
-        </pre>
+        </div>
       )}
-    </div>
-  );
-}
-
-function ResultCard({
-  result,
-  t,
-  onDiff,
-  onRollback,
-}: {
-  result: AiRun;
-  t: TFn;
-  onDiff: () => void;
-  onRollback: () => void;
-}) {
-  if (result.status === "ok" && result.ver != null) {
-    return (
-      <div className="rounded-ctl border border-primary/25 bg-primary/8 px-3 py-2.5">
-        <div className="flex items-center gap-1.5 text-xs font-bold text-primary">
-          <Sparkles className="h-3.5 w-3.5" />
-          {t("aiGeneratedVer", { n: result.ver })}
-        </div>
-        <div className="mt-0.5 text-[11px] text-sub2">
-          {t("aiPreviewSwitched")}
-        </div>
-        <div className="mt-2 flex gap-1.5">
-          <button
-            onClick={onDiff}
-            className="h-6 rounded-ctl border border-primary/30 bg-card px-2.5 text-[11px] font-bold text-primary transition hover:bg-primary hover:text-white"
-          >
-            {t("aiViewDiff")}
-          </button>
-          {result.ver > 1 && (
-            <button
-              onClick={onRollback}
-              className="h-6 rounded-ctl border border-line bg-card px-2.5 text-[11px] text-sub2 transition hover:border-primary/40"
-            >
-              {t("aiRollback")}
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-  if (result.status === "ok") {
-    // Textual replies show as a timeline card after reload; only a run that
-    // produced neither a version nor a reply needs an inline note.
-    return result.report ? null : (
-      <div className="text-center text-[11px] text-sub">{t("aiNoChange")}</div>
-    );
-  }
-  if (result.status === "cancelled") {
-    return (
-      <div className="text-center text-[11px] text-sub">
-        {t("aiCancelledLine")}
-      </div>
-    );
-  }
-  return (
-    <div className="flex items-start gap-2 rounded-ctl border border-danger/25 bg-danger/5 px-3 py-2 text-[11.5px] leading-relaxed text-danger">
-      <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <span className="select-text">{localizeAiError(result.error ?? "")}</span>
     </div>
   );
 }

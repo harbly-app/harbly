@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.zeyu.harbly",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "cargo build -p harbly-mcp && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "cargo build -p harbly-mcp --release && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -20,7 +20,10 @@
         "minHeight": 640,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 16, "y": 24 },
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 24
+        },
         "dragDropEnabled": true
       }
     ],

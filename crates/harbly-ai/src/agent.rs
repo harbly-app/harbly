@@ -1,11 +1,22 @@
-//! Local agent supply: spawn a `claude` / `codex` CLI against a scratch copy
-//! of the asset. The agent edits the copy in place with its own tools; the
-//! engine diffs the copy afterwards, so the library file is never exposed to
-//! the agent process. Zero API cost — the user's existing CLI subscription
-//! does the work.
+//! Local agent supplies.
+//!
+//! Claude Code runs headless with the Harbly MCP server attached and ONLY
+//! those tools allowed — it reads and writes assets through the same
+//! versioned surface as everyone else, never through raw file access. Its own
+//! session id is captured so the next turn resumes with full context.
+//!
+//! Codex has no MCP wiring here yet: it gets a scratch copy of the current
+//! asset, edits it with its own sandboxed tools, and the observed diff is
+//! written back through the caller's executor. Conversation context is
+//! replayed in the prompt.
 
-use crate::{AgentKind, AiError, AiEvent, AiTask, CancelFlag, EventSink, TaskOutput};
+use crate::tools::call_label;
+use crate::{
+    history_block, system_prompt, AgentKind, AiError, AiEvent, CancelFlag, EventSink, SessionTask,
+    Supply, ToolExecutor, TurnOutput,
+};
 use serde_json::Value;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -16,6 +27,8 @@ const AGENT_TIMEOUT: Duration = Duration::from_secs(900);
 /// Poll interval while waiting for output — lets cancellation land quickly
 /// even when the agent is silent.
 const POLL: Duration = Duration::from_millis(400);
+/// Cap on replayed conversation context for fresh (non-resumed) agent runs.
+const HISTORY_CHARS: usize = 6_000;
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,64 +133,202 @@ pub async fn detect_agent(kind: AgentKind) -> Option<AgentInfo> {
     })
 }
 
-fn agent_prompt(task: &AiTask) -> String {
-    let kind = if task.is_markdown { "Markdown" } else { "HTML" };
-    format!(
-        "You are working in a scratch directory containing a single file `{name}` — a \
-         self-contained {kind} asset from the user's library (title: {title}).\n\
-         The user's instruction about this file:\n{instruction}\n\n\
-         If the instruction asks for changes: edit `{name}` in place — modify only that file, \
-         keep it self-contained, do not create, rename or delete files, and do not run package \
-         managers or network commands; finish with one line in {lang} summarizing what changed.\n\
-         If it is a question or a review request: do not modify anything; answer it directly \
-         in concise markdown, in {lang}.",
-        name = task.file_name,
-        title = task.title,
-        instruction = task.instruction,
-        lang = task.reply_lang,
-    )
+fn agent_fields(supply: &Supply) -> (&str, Option<&str>, &Path, Option<&str>) {
+    match supply {
+        Supply::Agent {
+            program,
+            model,
+            workdir,
+            mcp_config_json,
+            ..
+        } => (
+            program.as_str(),
+            model.as_deref(),
+            workdir.as_path(),
+            mcp_config_json.as_deref(),
+        ),
+        Supply::Byok { .. } => unreachable!("agent runner called with a BYOK supply"),
+    }
 }
 
-fn build_command(task: &AiTask, kind: AgentKind, program: &str, workdir: &Path) -> Command {
-    let prompt = agent_prompt(task);
-    let mut cmd = Command::new(program);
-    match kind {
-        AgentKind::ClaudeCode => {
-            // acceptEdits always: it permits edits (scratch copy only), it does
-            // not force them — intent routing lives in the prompt, and the
-            // post-run diff decides whether anything actually changed.
-            cmd.arg("-p")
-                .arg(&prompt)
-                .args(["--output-format", "stream-json", "--verbose"])
-                .args(["--max-turns", "40"])
-                .args(["--permission-mode", "acceptEdits"]);
+// ---------- Claude Code (MCP mode) ----------
+
+pub(crate) async fn run_claude_turn(
+    task: &SessionTask,
+    supply: &Supply,
+    resume: Option<&str>,
+    cancel: CancelFlag,
+    on_event: EventSink<'_>,
+) -> Result<TurnOutput, AiError> {
+    let (program, model, workdir, mcp_config) = agent_fields(supply);
+    std::fs::create_dir_all(workdir)?;
+
+    // The MCP config goes through a temp file: robust across CLI versions
+    // (inline-JSON support varies) and keeps the command line short.
+    let mut config_file = tempfile::Builder::new()
+        .prefix("harbly-mcp-")
+        .suffix(".json")
+        .tempfile()?;
+    let config_path = match mcp_config {
+        Some(json) => {
+            config_file.write_all(json.as_bytes())?;
+            config_file.flush()?;
+            Some(config_file.path().to_path_buf())
         }
-        AgentKind::Codex => {
-            cmd.args(["exec", "--json", "--full-auto", "--skip-git-repo-check"])
-                .arg(&prompt);
+        None => None,
+    };
+
+    // With a resume id claude carries its own context; otherwise replay a
+    // compact transcript so a fresh CLI session still knows the conversation.
+    let mut prompt = String::new();
+    if resume.is_none() {
+        prompt.push_str(&history_block(&task.history, HISTORY_CHARS));
+    }
+    prompt.push_str(&task.instruction);
+
+    let mut cmd = Command::new(program);
+    cmd.arg("-p")
+        .arg(&prompt)
+        .args(["--output-format", "stream-json", "--verbose"])
+        .args(["--max-turns", "40"])
+        .args(["--append-system-prompt", &system_prompt(task)]);
+    if let Some(cfg) = &config_path {
+        cmd.arg("--mcp-config").arg(cfg);
+        // Pre-approve ONLY the Harbly tools (both server- and tool-level
+        // patterns, for CLI-version tolerance). Everything else — raw file
+        // tools, Bash — stays unapproved and is denied in print mode.
+        cmd.args(["--allowedTools", "mcp__harbly,mcp__harbly__*"]);
+    }
+    if let Some(id) = resume {
+        cmd.args(["--resume", id]);
+    }
+    if let Some(m) = model {
+        cmd.args(["--model", m]);
+    }
+    cmd.current_dir(workdir);
+
+    let parsed = run_agent_process(cmd, AgentKind::ClaudeCode, cancel, on_event).await?;
+    let reply = parsed
+        .final_text
+        .clone()
+        .unwrap_or_else(|| parsed.assistant_text());
+    if reply.trim().is_empty() {
+        return Err(AiError::Agent("empty reply".into()));
+    }
+    Ok(TurnOutput {
+        reply,
+        agent_session_id: parsed.session_id,
+    })
+}
+
+// ---------- Codex (scratch-copy mode) ----------
+
+pub(crate) async fn run_codex_turn(
+    task: &SessionTask,
+    supply: &Supply,
+    executor: &dyn ToolExecutor,
+    cancel: CancelFlag,
+    on_event: EventSink<'_>,
+) -> Result<TurnOutput, AiError> {
+    let (program, model, _workdir, _mcp) = agent_fields(supply);
+    let scratch = tempfile::Builder::new().prefix("harbly-ai-").tempdir()?;
+
+    // Materialize the current asset (if any) into the scratch dir via the
+    // executor — codex has no library tools, so this copy is its whole world.
+    let mut file_ctx: Option<(String, PathBuf, String)> = None;
+    if let Some(a) = &task.current_asset {
+        let read = executor
+            .execute(crate::tools::READ, &serde_json::json!({ "asset_id": a.id }))
+            .map_err(AiError::Agent)?;
+        let content = read["content"].as_str().unwrap_or_default().to_string();
+        let path = scratch.path().join(&a.file_name);
+        std::fs::write(&path, &content)?;
+        file_ctx = Some((a.id.clone(), path, content));
+    }
+
+    let mut prompt = system_prompt(task);
+    prompt.push_str("\n\n");
+    prompt.push_str(&history_block(&task.history, HISTORY_CHARS));
+    if let Some(a) = &task.current_asset {
+        prompt.push_str(&format!(
+            "A working copy of \"{}\" is in the current directory. If the instruction asks for \
+             changes, edit that file in place (only that file; keep it self-contained; no new \
+             files, no package managers or network commands). Otherwise do not modify anything \
+             and answer directly.\n\n",
+            a.file_name
+        ));
+    }
+    prompt.push_str("Instruction: ");
+    prompt.push_str(&task.instruction);
+
+    let mut cmd = Command::new(program);
+    cmd.args(["exec", "--json", "--full-auto", "--skip-git-repo-check"]);
+    if let Some(m) = model {
+        cmd.args(["-m", m]);
+    }
+    if !task.effort.is_empty() {
+        cmd.args(["-c", &format!("model_reasoning_effort={}", task.effort)]);
+    }
+    cmd.arg(&prompt).current_dir(scratch.path());
+
+    let parsed = run_agent_process(cmd, AgentKind::Codex, cancel, on_event).await?;
+    let mut reply = parsed
+        .final_text
+        .clone()
+        .unwrap_or_else(|| parsed.assistant_text());
+
+    // Outcome by observation: a changed scratch copy is written back through
+    // the executor — the same versioned path every other supply uses.
+    if let Some((asset_id, path, before)) = file_ctx {
+        let after = std::fs::read_to_string(&path)?;
+        if after != before {
+            let summary: String = task.instruction.chars().take(80).collect();
+            let args = serde_json::json!({
+                "asset_id": asset_id, "content": after, "summary": summary,
+            });
+            on_event(AiEvent::Action {
+                label: call_label(crate::tools::WRITE, &args),
+            });
+            executor
+                .execute(crate::tools::WRITE, &args)
+                .map_err(AiError::Agent)?;
         }
     }
-    cmd.current_dir(workdir)
-        .env("PATH", child_path_env())
+    if reply.trim().is_empty() {
+        reply = task.instruction.clone();
+    }
+    Ok(TurnOutput {
+        reply,
+        agent_session_id: None,
+    })
+}
+
+// ---------- Shared process driver ----------
+
+struct ParsedRun {
+    texts: Vec<String>,
+    final_text: Option<String>,
+    session_id: Option<String>,
+}
+
+impl ParsedRun {
+    fn assistant_text(&self) -> String {
+        self.texts.join("\n")
+    }
+}
+
+async fn run_agent_process(
+    mut cmd: Command,
+    kind: AgentKind,
+    cancel: CancelFlag,
+    on_event: EventSink<'_>,
+) -> Result<ParsedRun, AiError> {
+    cmd.env("PATH", child_path_env())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    cmd
-}
-
-pub(crate) async fn run(
-    task: &AiTask,
-    kind: AgentKind,
-    program: &str,
-    cancel: CancelFlag,
-    on_event: EventSink<'_>,
-) -> Result<TaskOutput, AiError> {
-    let scratch = tempfile::Builder::new().prefix("harbly-ai-").tempdir()?;
-    let file_path = scratch.path().join(&task.file_name);
-    std::fs::write(&file_path, &task.content)?;
-
-    let mut child = build_command(task, kind, program, scratch.path())
+    let mut child = cmd
         .spawn()
         .map_err(|e| AiError::Agent(format!("spawn failed: {e}")))?;
 
@@ -244,24 +395,11 @@ pub(crate) async fn run(
         }));
     }
 
-    // Outcome by observation: the scratch copy changed → it's a rewrite; it
-    // didn't → the agent's text IS the reply (answer / review / no-op note).
-    let assistant_text = parser.assistant_text();
-    let mut out = TaskOutput {
-        assistant_text: assistant_text.clone(),
-        ..TaskOutput::default()
-    };
-    let after = std::fs::read_to_string(&file_path)?;
-    if after != task.content {
-        out.new_content = Some(after);
-    } else {
-        let reply = parser.final_text.clone().unwrap_or(assistant_text);
-        if reply.trim().is_empty() {
-            return Err(AiError::Agent("empty reply".into()));
-        }
-        out.reply = Some(reply);
-    }
-    Ok(out)
+    Ok(ParsedRun {
+        texts: parser.texts,
+        final_text: parser.final_text,
+        session_id: parser.session_id,
+    })
 }
 
 /// Tolerant JSONL reader for both CLIs (and both generations of the codex
@@ -271,6 +409,7 @@ struct StreamParser {
     kind: AgentKind,
     texts: Vec<String>,
     final_text: Option<String>,
+    session_id: Option<String>,
     error: Option<String>,
 }
 
@@ -280,12 +419,9 @@ impl StreamParser {
             kind,
             texts: Vec::new(),
             final_text: None,
+            session_id: None,
             error: None,
         }
-    }
-
-    fn assistant_text(&self) -> String {
-        self.texts.join("\n")
     }
 
     fn feed(&mut self, line: &str) -> Vec<AiEvent> {
@@ -310,6 +446,9 @@ impl StreamParser {
 
     fn feed_claude(&mut self, v: &Value) -> Vec<AiEvent> {
         let mut out = vec![];
+        if let Some(id) = v["session_id"].as_str() {
+            self.session_id = Some(id.to_string());
+        }
         match v["type"].as_str() {
             Some("assistant") => {
                 if let Some(blocks) = v["message"]["content"].as_array() {
@@ -405,8 +544,12 @@ impl StreamParser {
     }
 }
 
-/// "Edit pricing.html" / "Bash: ls -la" — enough for a status line, no more.
+/// Harbly MCP calls render through the shared label builder so agent and BYOK
+/// activity read identically; claude's built-in tools keep their own style.
 fn tool_label(name: &str, input: &Value) -> String {
+    if name.starts_with("mcp__harbly__") {
+        return call_label(name, input);
+    }
     let target = input["file_path"]
         .as_str()
         .map(|p| {
@@ -448,30 +591,20 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn task() -> AiTask {
-        AiTask {
-            instruction: "dark theme".into(),
-            file_name: "a.html".into(),
-            content: "<html></html>".into(),
-            is_markdown: false,
-            title: "A".into(),
-            reply_lang: "en".into(),
-        }
-    }
+    use crate::tests::task;
+    use crate::ToolExecutor;
 
     #[test]
-    fn claude_stream_events() {
+    fn claude_stream_captures_session_and_mcp_labels() {
         let mut p = StreamParser::new(AgentKind::ClaudeCode);
-        assert!(p.feed(r#"{"type":"system","subtype":"init"}"#).is_empty());
+        p.feed(r#"{"type":"system","subtype":"init","session_id":"sess-42"}"#);
+        assert_eq!(p.session_id.as_deref(), Some("sess-42"));
         let evs = p.feed(
-            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Working"},{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/x/a.html"}}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__harbly__read_asset","input":{"asset_id":"abcd1234-x"}}]}}"#,
         );
-        assert_eq!(evs.len(), 2);
-        assert!(matches!(&evs[0], AiEvent::Delta { text } if text == "Working"));
-        assert!(matches!(&evs[1], AiEvent::Action { label } if label == "Edit a.html"));
-        p.feed(r#"{"type":"result","subtype":"success","result":"Done."}"#);
-        assert_eq!(p.final_text.as_deref(), Some("Done."));
+        assert!(matches!(&evs[0], AiEvent::Action { label } if label == "read_asset abcd1234"));
+        p.feed(r#"{"type":"result","subtype":"success","result":"完成。","session_id":"sess-42"}"#);
+        assert_eq!(p.final_text.as_deref(), Some("完成。"));
         assert!(p.error.is_none());
     }
 
@@ -483,25 +616,19 @@ mod tests {
     }
 
     #[test]
-    fn codex_legacy_events() {
+    fn codex_both_schemas_parse() {
         let mut p = StreamParser::new(AgentKind::Codex);
-        let evs = p.feed(r#"{"id":"1","msg":{"type":"exec_command_begin","command":["bash","-lc","sed -i s/a/b/ a.html"]}}"#);
-        assert!(matches!(&evs[0], AiEvent::Action { label } if label.starts_with("bash -lc")));
-        p.feed(r#"{"id":"2","msg":{"type":"agent_message","message":"done"}}"#);
+        let evs = p.feed(
+            r#"{"id":"1","msg":{"type":"exec_command_begin","command":["bash","-lc","ls"]}}"#,
+        );
+        assert!(matches!(&evs[0], AiEvent::Action { label } if label == "bash -lc ls"));
         p.feed(r#"{"id":"3","msg":{"type":"task_complete","last_agent_message":"done"}}"#);
         assert_eq!(p.final_text.as_deref(), Some("done"));
-    }
 
-    #[test]
-    fn codex_item_events() {
         let mut p = StreamParser::new(AgentKind::Codex);
         let evs =
             p.feed(r#"{"type":"item.completed","item":{"type":"agent_message","text":"hi"}}"#);
         assert!(matches!(&evs[0], AiEvent::Delta { text } if text == "hi"));
-        let evs = p.feed(
-            r#"{"type":"item.started","item":{"type":"command_execution","command":"ls -la"}}"#,
-        );
-        assert!(matches!(&evs[0], AiEvent::Action { label } if label == "ls -la"));
     }
 
     #[test]
@@ -511,56 +638,108 @@ mod tests {
         assert!(p.error.is_none());
     }
 
-    #[test]
-    fn prompt_carries_both_branches() {
-        let p = agent_prompt(&task());
-        assert!(p.contains("`a.html`"));
-        assert!(p.contains("dark theme"));
-        assert!(p.contains("If the instruction asks for changes"));
-        assert!(p.contains("do not modify anything"));
+    struct StubExec {
+        content: String,
+        writes: std::sync::Mutex<Vec<Value>>,
     }
 
-    #[tokio::test]
-    async fn revise_runs_a_fake_agent_and_reads_back_the_edit() {
-        // A stub "agent": ignores its args, rewrites the file, prints one
-        // stream-json line. Exercises spawn → parse → diff end to end.
-        let dir = tempfile::tempdir().unwrap();
-        let stub = dir.path().join("claude");
-        std::fs::write(
-            &stub,
-            "#!/bin/sh\nprintf '<html>dark</html>' > a.html\necho '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"ok\"}'\n",
-        )
-        .unwrap();
+    impl ToolExecutor for StubExec {
+        fn execute(&self, name: &str, args: &Value) -> Result<Value, String> {
+            match name {
+                crate::tools::READ => Ok(serde_json::json!({
+                    "id": args["asset_id"], "fileName": "a.html", "content": self.content,
+                })),
+                crate::tools::WRITE => {
+                    self.writes.lock().unwrap().push(args.clone());
+                    Ok(serde_json::json!({ "ver": 2 }))
+                }
+                _ => Err("unexpected tool".into()),
+            }
+        }
+    }
+
+    fn stub_supply(dir: &Path, script: &str) -> (PathBuf, Supply) {
+        let bin = dir.join("codex");
+        std::fs::write(&bin, script).unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let task = task();
+        let supply = Supply::Agent {
+            kind: AgentKind::Codex,
+            program: bin.to_string_lossy().to_string(),
+            model: None,
+            workdir: dir.to_path_buf(),
+            mcp_config_json: None,
+        };
+        (bin, supply)
+    }
+
+    #[tokio::test]
+    async fn codex_scratch_edit_writes_back_through_executor() {
+        let dir = tempfile::tempdir().unwrap();
+        // Stub agent: rewrites the scratch copy and reports via legacy JSONL
+        let (_bin, supply) = stub_supply(
+            dir.path(),
+            "#!/bin/sh\nprintf '<html>dark</html>' > a.html\necho '{\"msg\":{\"type\":\"task_complete\",\"last_agent_message\":\"改好了\"}}'\n",
+        );
+        let mut t = task();
+        t.current_asset = Some(crate::AssetRef {
+            id: "a1".into(),
+            file_name: "a.html".into(),
+            title: "A".into(),
+        });
+        let exec = StubExec {
+            content: "<html>light</html>".into(),
+            writes: std::sync::Mutex::new(vec![]),
+        };
         let mut events = vec![];
-        let out = run(
-            &task,
-            AgentKind::ClaudeCode,
-            stub.to_str().unwrap(),
-            CancelFlag::new(),
-            &mut |e| events.push(e),
-        )
+        let out = run_codex_turn(&t, &supply, &exec, CancelFlag::new(), &mut |e| {
+            events.push(e)
+        })
         .await
         .unwrap();
-        assert_eq!(out.new_content.as_deref(), Some("<html>dark</html>"));
+        assert_eq!(out.reply, "改好了");
+        let writes = exec.writes.lock().unwrap();
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0]["asset_id"], "a1");
+        assert_eq!(writes[0]["content"], "<html>dark</html>");
+    }
+
+    #[tokio::test]
+    async fn codex_question_leaves_file_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_bin, supply) = stub_supply(
+            dir.path(),
+            "#!/bin/sh\necho '{\"msg\":{\"type\":\"agent_message\",\"message\":\"这个页面没有外部请求。\"}}'\n",
+        );
+        let mut t = task();
+        t.current_asset = Some(crate::AssetRef {
+            id: "a1".into(),
+            file_name: "a.html".into(),
+            title: "A".into(),
+        });
+        let exec = StubExec {
+            content: "<html>light</html>".into(),
+            writes: std::sync::Mutex::new(vec![]),
+        };
+        let out = run_codex_turn(&t, &supply, &exec, CancelFlag::new(), &mut |_| {})
+            .await
+            .unwrap();
+        assert!(out.reply.contains("没有外部请求"));
+        assert!(exec.writes.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn cancel_kills_a_hanging_agent() {
         let dir = tempfile::tempdir().unwrap();
-        let stub = dir.path().join("claude");
-        std::fs::write(&stub, "#!/bin/sh\nsleep 60\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        let task = task();
+        let (_bin, supply) = stub_supply(dir.path(), "#!/bin/sh\nsleep 60\n");
+        let t = task();
+        let exec = StubExec {
+            content: String::new(),
+            writes: std::sync::Mutex::new(vec![]),
+        };
         let cancel = CancelFlag::new();
         let c2 = cancel.clone();
         tokio::spawn(async move {
@@ -568,16 +747,53 @@ mod tests {
             c2.cancel();
         });
         let started = Instant::now();
-        let err = run(
-            &task,
-            AgentKind::ClaudeCode,
-            stub.to_str().unwrap(),
-            cancel,
+        let mut bare = t.clone();
+        bare.current_asset = None;
+        let err = run_codex_turn(&bare, &supply, &exec, cancel, &mut |_| {})
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AiError::Cancelled));
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn claude_turn_resumes_and_returns_session_id() {
+        // Stub claude: prints the args file so the test can assert on flags,
+        // then a result event carrying a session id.
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("claude");
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\necho \"$@\" > args.txt\necho '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"ok\",\"session_id\":\"s-9\"}'\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let supply = Supply::Agent {
+            kind: AgentKind::ClaudeCode,
+            program: bin.to_string_lossy().to_string(),
+            model: Some("sonnet".into()),
+            workdir: dir.path().to_path_buf(),
+            mcp_config_json: Some(r#"{"mcpServers":{"harbly":{"command":"x"}}}"#.into()),
+        };
+        let out = run_claude_turn(
+            &task(),
+            &supply,
+            Some("prev-1"),
+            CancelFlag::new(),
             &mut |_| {},
         )
         .await
-        .unwrap_err();
-        assert!(matches!(err, AiError::Cancelled));
-        assert!(started.elapsed() < Duration::from_secs(5));
+        .unwrap();
+        assert_eq!(out.reply, "ok");
+        assert_eq!(out.agent_session_id.as_deref(), Some("s-9"));
+        let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
+        assert!(args.contains("--resume prev-1"));
+        assert!(args.contains("--mcp-config"));
+        assert!(args.contains("--allowedTools mcp__harbly,mcp__harbly__*"));
+        assert!(args.contains("--model sonnet"));
     }
 }

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -15,9 +15,13 @@ import CommandPalette from "./components/CommandPalette";
 import Modals from "./components/Modals";
 import DragGhost from "./components/DragGhost";
 
+// Lazy: sessions, transcripts and supply probing only load when the panel opens
+const AiPanel = lazy(() => import("./components/AiPanel"));
+
 export default function App() {
   const phase = useStore((s) => s.phase);
   const viewerOpen = useStore((s) => s.viewerAsset !== null);
+  const aiOpen = useStore((s) => s.aiOpen);
   const dragOver = useStore((s) => s.dragOver);
   const toast = useStore((s) => s.toast);
   const t = makeT(useStore((s) => s.lang));
@@ -197,13 +201,10 @@ export default function App() {
         e.preventDefault();
         useStore.getState().toggleSidebar();
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
-        // AI panel: toggle in the viewer; from the grid, open it on the single
-        // selected asset
+        // AI panel is library-scoped: toggle anywhere
         e.preventDefault();
         const st = useStore.getState();
-        if (st.phase !== "main") return;
-        if (st.viewerAsset) st.toggleAi();
-        else if (st.selIds.length === 1) st.openAiFor(st.selIds[0]);
+        if (st.phase === "main") st.toggleAi();
       } else if ((e.metaKey || e.ctrlKey) && e.key === ",") {
         e.preventDefault();
         const st = useStore.getState();
@@ -235,7 +236,19 @@ export default function App() {
       <TitleBar />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
-        {viewerOpen ? <Viewer /> : <AssetGrid />}
+        {/* `relative` anchors the AI panel's narrow-window overlay mode */}
+        <div className="relative flex min-w-0 flex-1">
+          {viewerOpen ? <Viewer /> : <AssetGrid />}
+          {aiOpen && (
+            <Suspense
+              fallback={
+                <div className="ai-panel shrink-0" aria-hidden="true" />
+              }
+            >
+              <AiPanel />
+            </Suspense>
+          )}
+        </div>
       </div>
       <CommandPalette />
       <Modals />
