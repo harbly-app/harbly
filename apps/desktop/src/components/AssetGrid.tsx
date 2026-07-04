@@ -298,8 +298,8 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
             }
             dragStartHandler(() => payloadFor(a))(e);
           }}
-          className={`bg-white border rounded-card overflow-hidden transition cursor-default ${
-            selected ? "border-primary ring-2 ring-primary/25" : "border-line hover:shadow-sm hover:border-[#DDD9EA]"
+          className={`bg-card border rounded-card overflow-hidden transition cursor-default ${
+            selected ? "border-primary ring-2 ring-primary/25" : "border-line hover:shadow-sm hover:border-line-strong"
           }`}
         >
           <div className="bg-side border-b border-line overflow-hidden" style={{ height: Math.round(w * 0.72) }}>
@@ -322,7 +322,7 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
             {editing ? (
               <RenameInput
                 initial={stem(a.fileName)}
-                className="w-full h-6 px-1.5 -mx-0.5 rounded border border-primary bg-white outline-none text-[13px] font-bold"
+                className="w-full h-6 px-1.5 -mx-0.5 rounded border border-primary bg-card outline-none text-[13px] font-bold"
                 onCommit={(v) => st().doRename(a.id, v)}
                 onCancel={() => st().stopEdit()}
               />

@@ -110,7 +110,7 @@ export default function TitleBar() {
           >
             <Search className="w-3.5 h-3.5" />
             <span className="flex-1 text-left">{t("searchPlaceholder")}</span>
-            <kbd className="text-[10px] bg-white border border-line rounded px-1.5 py-0.5">⌘K</kbd>
+            <kbd className="text-[10px] bg-card border border-line rounded px-1.5 py-0.5">⌘K</kbd>
           </button>
 
           <div className="flex-1" />

@@ -1,8 +1,9 @@
-import { Folder, FolderOpen, Hash, Images, Inbox as InboxIcon, RefreshCw } from "lucide-react";
+import { Folder, FolderOpen, Hash, Images, Inbox as InboxIcon, Monitor, Moon, RefreshCw, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { LANGS, makeT } from "../lib/i18n";
 import { useStore } from "../lib/store";
+import type { ThemePref } from "../lib/theme";
 import type { TreeNode } from "../lib/types";
 
 export default function Modals() {
@@ -29,7 +30,7 @@ export default function Modals() {
       onMouseDown={() => setModal(null)}
     >
       <div
-        className="w-[420px] bg-white rounded-card shadow-2xl border border-line p-5"
+        className="w-[420px] bg-card rounded-card shadow-2xl border border-line p-5"
         onMouseDown={(e) => e.stopPropagation()}
       >
         {modal.kind === "move" && <Move />}
@@ -239,7 +240,7 @@ function Tags() {
               key={x}
               onClick={() => toggle(x)}
               className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11.5px] font-bold border transition ${
-                on ? "bg-primary text-white border-primary" : "bg-white text-sub2 border-line hover:border-primary/50"
+                on ? "bg-primary text-white border-primary" : "bg-card text-sub2 border-line hover:border-primary/50"
               }`}
             >
               <Hash className="w-3 h-3" />
@@ -260,8 +261,17 @@ function Settings() {
   const enterMain = useStore((s) => s.enterMain);
   const lang = useStore((s) => s.lang);
   const setLang = useStore((s) => s.setLang);
+  const theme = useStore((s) => s.theme);
+  const setTheme = useStore((s) => s.setTheme);
   const t = makeT(lang);
   const [busy, setBusy] = useState(false);
+
+  // macOS Appearance order: Light · Dark · Auto (follow system)
+  const themeOptions: { value: ThemePref; icon: typeof Sun; label: string }[] = [
+    { value: "light", icon: Sun, label: t("themeLight") },
+    { value: "dark", icon: Moon, label: t("themeDark") },
+    { value: "system", icon: Monitor, label: t("themeSystem") },
+  ];
 
   const changeLibrary = async () => {
     const dir = await api.pickFolder();
@@ -294,6 +304,26 @@ function Settings() {
     <>
       <Title>{t("settings")}</Title>
       <div className="space-y-4">
+        <div>
+          <div className="text-[11px] font-bold text-sub mb-1.5">{t("appearance")}</div>
+          <div className="flex gap-1.5">
+            {themeOptions.map(({ value, icon: Icon, label }) => (
+              <button
+                key={value}
+                onClick={() => setTheme(value)}
+                className={`h-7 px-2.5 rounded-ctl text-xs border transition flex items-center gap-1.5 ${
+                  theme === value
+                    ? "bg-primary text-white border-primary font-bold"
+                    : "bg-side border-line hover:border-primary/50"
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div>
           <div className="text-[11px] font-bold text-sub mb-1.5">{t("language")}</div>
           <div className="flex flex-wrap gap-1.5">

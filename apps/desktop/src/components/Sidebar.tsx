@@ -94,7 +94,7 @@ export default function Sidebar() {
               ? "bg-primary/15 ring-1 ring-primary"
               : folder === INBOX && !viewerId
                 ? "bg-primary/10 text-primary font-bold"
-                : "hover:bg-white text-ink"
+                : "hover:bg-card text-ink"
           }`}
         >
           <Inbox className="w-4 h-4" />
@@ -112,7 +112,7 @@ export default function Sidebar() {
         <button
           onClick={() => st().setModal({ kind: "newFolder", parent: "" })}
           title={t("newFolder")}
-          className="w-5 h-5 grid place-items-center rounded text-sub hover:text-primary hover:bg-white transition"
+          className="w-5 h-5 grid place-items-center rounded text-sub hover:text-primary hover:bg-card transition"
         >
           <FolderPlus className="w-3.5 h-3.5" />
         </button>
@@ -127,7 +127,7 @@ export default function Sidebar() {
               ? "bg-primary/15 ring-1 ring-primary"
               : folder === "" && !viewerId
                 ? "bg-primary/10 text-primary font-bold"
-                : "hover:bg-white"
+                : "hover:bg-card"
           }`}
           title={t("dropToRoot")}
         >
@@ -163,7 +163,7 @@ export default function Sidebar() {
                   key={t.name}
                   onClick={() => gotoFolder(`#${t.name}`)}
                   className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-ctl text-[12.5px] transition ${
-                    active ? "bg-primary/10 text-primary font-bold" : "hover:bg-white"
+                    active ? "bg-primary/10 text-primary font-bold" : "hover:bg-card"
                   }`}
                 >
                   <Hash className={`w-3.5 h-3.5 ${active ? "text-primary" : "text-sub"}`} />
@@ -204,7 +204,7 @@ function TreeRow(props: {
         <CM.Trigger asChild>
           <div
             className={`flex items-center gap-0.5 pr-2.5 py-1.5 rounded-ctl text-[12.5px] cursor-default transition ${
-              active && !isDrop ? "bg-primary/10 text-primary font-bold" : isDrop ? "" : "hover:bg-white"
+              active && !isDrop ? "bg-primary/10 text-primary font-bold" : isDrop ? "" : "hover:bg-card"
             }`}
             style={{ paddingLeft: 6 + depth * 13 }}
             onClick={() => !editing && gotoFolder(node.rel)}
@@ -264,7 +264,7 @@ function TreeRow(props: {
               onClick={() => st().doExportFolder(node.rel)}
             />
             <MSep />
-            {/* Undoable via Cmd+Z, no confirmation dialog needed (Finder semantics) */}
+            {/* Empty folders trash instantly (Cmd+Z undoable); non-empty ones confirm first */}
             <MItem
               danger
               icon={<Trash2 className="w-3.5 h-3.5" />}
@@ -327,7 +327,7 @@ function FileRow(props: { f: TreeFile; folderRel: string; depth: number; viewerI
           onMouseDown={dragStartHandler({ ids: [f.id], rels: [rel], label: f.name, fromFolder: folderRel })}
           {...dropHandlers(folderRel)}
           className={`flex items-center gap-1.5 pr-2.5 py-[5px] rounded-ctl text-[12px] cursor-default transition ${
-            active ? "bg-primary/10 text-primary font-bold" : "text-sub2 hover:bg-white"
+            active ? "bg-primary/10 text-primary font-bold" : "text-sub2 hover:bg-card"
           }`}
           style={{ paddingLeft: 6 + depth * 13 + 20 }}
         >

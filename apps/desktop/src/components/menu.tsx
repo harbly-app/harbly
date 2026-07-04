@@ -13,7 +13,7 @@ export function windowDrag(e: React.MouseEvent) {
 }
 
 export const menuContentCls =
-  "z-50 min-w-[190px] bg-white border border-line rounded-xl shadow-xl p-1.5 text-[12.5px]";
+  "z-50 min-w-[190px] bg-card border border-line rounded-xl shadow-xl p-1.5 text-[12.5px]";
 
 export function MItem(props: {
   icon: React.ReactNode;

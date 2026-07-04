@@ -4,6 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Harbly</title>
+    <!-- Pre-paint theme: apply .dark before CSS/React load so a dark launch never flashes white -->
+    <style>
+      html {
+        background: #fafafc;
+      }
+      html.dark {
+        background: #1a191f;
+      }
+    </style>
+    <script>
+      (function () {
+        try {
+          var p = localStorage.getItem("harbly.theme");
+          var dark =
+            p === "dark" ||
+            (p !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (_) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

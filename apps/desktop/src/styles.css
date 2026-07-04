@@ -9,6 +9,8 @@
   --color-paper: #fafafc;
   --color-side: #f7f6fb;
   --color-line: #eceaf2;
+  --color-line-strong: #ddd9ea;
+  --color-card: #ffffff;
   --color-ok: #28a96a;
   --color-warn: #eab308;
   --color-danger: #e5484d;
@@ -16,6 +18,31 @@
     "Noto Sans SC", "Helvetica Neue", Arial, sans-serif;
   --radius-card: 16px;
   --radius-ctl: 10px;
+}
+
+/* Dark theme = token flip only: components use semantic colors (paper/side/card/line/ink/sub),
+   so no per-component dark: variants are needed. The .dark class lives on <html>, set pre-paint
+   by the inline script in index.html and kept in sync by lib/theme.ts. */
+.dark {
+  --color-primary: #8672dd;
+  --color-primary-light: #a493ea;
+  --color-ink: #ebe8f2;
+  --color-sub: #93909f;
+  --color-sub2: #bcb7c8;
+  --color-paper: #1a191f;
+  --color-side: #232129;
+  --color-line: #343141;
+  --color-line-strong: #474254;
+  --color-card: #2a2732;
+}
+
+html {
+  color-scheme: light;
+  --scrollbar-thumb: #d9d6e4;
+}
+html.dark {
+  color-scheme: dark;
+  --scrollbar-thumb: #454152;
 }
 
 html,
@@ -50,7 +77,7 @@ textarea {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d9d6e4;
+  background: var(--scrollbar-thumb);
   border-radius: 99px;
   border: 3px solid transparent;
   background-clip: content-box;

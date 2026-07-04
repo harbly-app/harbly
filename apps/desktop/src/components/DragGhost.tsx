@@ -27,7 +27,7 @@ export default function DragGhost() {
   if (!drag || !pos) return null;
   return (
     <div
-      className="fixed z-[100] pointer-events-none flex items-center gap-1.5 bg-white border border-primary shadow-lg rounded-full px-3 py-1.5 text-xs font-bold text-ink"
+      className="fixed z-[100] pointer-events-none flex items-center gap-1.5 bg-card border border-primary shadow-lg rounded-full px-3 py-1.5 text-xs font-bold text-ink"
       style={{ left: pos.x + 12, top: pos.y - 10 }}
     >
       <FileCode2 className="w-3.5 h-3.5 text-primary" />

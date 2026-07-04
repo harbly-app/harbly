@@ -133,18 +133,22 @@ export default function App() {
       }
     }).then(keep);
 
-    getCurrentWebview()
-      .onDragDropEvent((event) => {
-        const st = useStore.getState();
-        if (st.phase !== "main") return;
-        const p = event.payload;
-        if (p.type === "enter" || p.type === "over") st.setDragOver(true);
-        else if (p.type === "drop") {
-          st.setDragOver(false);
-          st.importFiles(p.paths);
-        } else st.setDragOver(false);
-      })
-      .then(keep);
+    try {
+      getCurrentWebview()
+        .onDragDropEvent((event) => {
+          const st = useStore.getState();
+          if (st.phase !== "main") return;
+          const p = event.payload;
+          if (p.type === "enter" || p.type === "over") st.setDragOver(true);
+          else if (p.type === "drop") {
+            st.setDragOver(false);
+            st.importFiles(p.paths);
+          } else st.setDragOver(false);
+        })
+        .then(keep);
+    } catch {
+      // Outside Tauri (plain-browser dev) the webview handle throws synchronously; file drop is simply unavailable there
+    }
 
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -194,12 +198,13 @@ export default function App() {
         </div>
       )}
       {toast && (
-        <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-ink text-white text-xs px-4 py-2.5 rounded-full shadow-lg">
+        // ink/paper swap so the pill stays high-contrast in both themes (dark theme = light pill)
+        <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-ink text-paper text-xs px-4 py-2.5 rounded-full shadow-lg">
           <span>{toast.text}</span>
           {toast.action && (
             <button
               onClick={toast.action.fn}
-              className="font-bold text-primary-light hover:text-white transition shrink-0"
+              className="font-bold text-primary-light hover:opacity-75 transition shrink-0"
             >
               {toast.action.label}
             </button>

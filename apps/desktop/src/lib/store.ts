@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { api } from "./api";
 import { initialLang, localizeError, setCurrentLang, tr } from "./i18n";
 import type { Lang } from "./i18n";
+import { applyThemePref, initialThemePref } from "./theme";
+import type { ThemePref } from "./theme";
 import type { AssetMeta, ImportResult, SortKey, TagInfo, TreeNode } from "./types";
 import { INBOX } from "./types";
 
@@ -59,8 +61,11 @@ interface S {
   sidebarOpen: boolean;
   /** UI language (six locales), kept in sync with the native menu */
   lang: Lang;
+  /** Appearance preference; "system" follows the OS live */
+  theme: ThemePref;
 
   setLang(l: Lang): void;
+  setTheme(t: ThemePref): void;
   toggleSidebar(): void;
   boot(): Promise<void>;
   enterMain(): Promise<void>;
@@ -141,6 +146,11 @@ let toastTimer: ReturnType<typeof setTimeout> | undefined;
 const bootLang = initialLang();
 setCurrentLang(bootLang);
 
+// The pre-paint script in index.html already set the .dark class; this re-applies it
+// (harmless) and attaches the system-appearance listener + native window sync
+const bootTheme = initialThemePref();
+applyThemePref(bootTheme);
+
 export const useStore = create<S>((set, get) => ({
   phase: "loading",
   root: null,
@@ -165,12 +175,19 @@ export const useStore = create<S>((set, get) => ({
   dropTarget: null,
   sidebarOpen: localStorage.getItem("harbly.sidebar") !== "0",
   lang: bootLang,
+  theme: bootTheme,
 
   setLang: (l) => {
     localStorage.setItem("harbly.lang", l);
     setCurrentLang(l);
     set({ lang: l });
     api.setLanguage(l).catch(() => {}); // Rebuild native menu + persist to config
+  },
+
+  setTheme: (t) => {
+    localStorage.setItem("harbly.theme", t);
+    set({ theme: t });
+    applyThemePref(t);
   },
 
   toggleSidebar: () =>

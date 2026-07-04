@@ -51,7 +51,7 @@ export default function CommandPalette() {
       onMouseDown={() => setPalette(false)}
     >
       <div
-        className="w-[580px] bg-white rounded-card shadow-2xl border border-line overflow-hidden"
+        className="w-[580px] bg-card rounded-card shadow-2xl border border-line overflow-hidden"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <Command shouldFilter={false} loop>

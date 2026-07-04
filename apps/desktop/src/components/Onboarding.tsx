@@ -75,7 +75,7 @@ export default function Onboarding() {
             <button
               onClick={createNew}
               disabled={busy}
-              className="w-full text-left bg-white border border-line rounded-card p-4 hover:border-primary/50 hover:shadow-sm transition group disabled:opacity-50"
+              className="w-full text-left bg-card border border-line rounded-card p-4 hover:border-primary/50 hover:shadow-sm transition group disabled:opacity-50"
             >
               <div className="flex items-center gap-3">
                 <FolderPlus className="w-5 h-5 text-primary" />
@@ -102,7 +102,7 @@ export default function Onboarding() {
             <button
               onClick={adoptExisting}
               disabled={busy}
-              className="w-full text-left bg-white border border-line rounded-card p-4 hover:border-primary/50 hover:shadow-sm transition disabled:opacity-50"
+              className="w-full text-left bg-card border border-line rounded-card p-4 hover:border-primary/50 hover:shadow-sm transition disabled:opacity-50"
             >
               <div className="flex items-center gap-3">
                 <FolderOpen className="w-5 h-5 text-primary" />
@@ -120,7 +120,7 @@ export default function Onboarding() {
         )}
 
         {step === 1 && (
-          <div className="bg-white border border-line rounded-card p-5">
+          <div className="bg-card border border-line rounded-card p-5">
             <div className="flex items-center gap-2 text-sm font-bold">
               {!scanDone && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
               {scanDone ? t("scanDone") : t("scanningTitle")}

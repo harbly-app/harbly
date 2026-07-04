@@ -62,6 +62,7 @@ export default function Viewer() {
 
   return (
     <main className="flex-1 min-w-0 flex flex-col bg-paper">
+      {/* Document canvas stays literal white in both themes: assets are standalone pages that assume a white default background (Quick Look behaves the same) */}
       <div className="flex-1 relative bg-white">
         <iframe
           key={`${a.id}:${a.currentHash}:${allowToken ?? "sandboxed"}`}
@@ -82,7 +83,7 @@ export default function Viewer() {
           blocked > 0 && (
             <button
               onClick={allowOnce}
-              className="absolute bottom-3 right-3 flex items-center gap-1.5 bg-ink/85 text-white text-[10.5px] px-2.5 py-1.5 rounded-full hover:bg-ink transition"
+              className="absolute bottom-3 right-3 flex items-center gap-1.5 bg-ink/85 text-paper text-[10.5px] px-2.5 py-1.5 rounded-full hover:bg-ink transition"
             >
               <ShieldCheck className="w-3 h-3 text-ok" />
               {t("blockedN", { n: blocked })}
