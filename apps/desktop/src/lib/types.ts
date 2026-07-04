@@ -63,6 +63,54 @@ export interface ImportResult {
 
 export type SortKey = "recent" | "name" | "modified";
 
+export interface VersionInfo {
+  ver: number;
+  hash: string;
+  /** Canonical (Chinese) label written by the core; localized for display */
+  label: string;
+  sizeBytes: number;
+  createdAt: number;
+}
+
+/** AI supply ids: local agent CLIs + BYOK providers */
+export type AiSupply =
+  "claude" | "codex" | "anthropic" | "openai" | "openrouter";
+export type ByokProvider = "anthropic" | "openai" | "openrouter";
+export const BYOK_PROVIDERS: ByokProvider[] = [
+  "anthropic",
+  "openai",
+  "openrouter",
+];
+
+export interface AgentInfo {
+  kind: "claude" | "codex";
+  path: string;
+  version: string | null;
+}
+
+/** Non-secret AI preferences persisted in the app config (keys live in the keychain) */
+export interface AiConfig {
+  supply?: AiSupply;
+  models?: Partial<Record<ByokProvider, string>>;
+}
+
+export type AiEvent =
+  { type: "delta"; text: string } | { type: "action"; label: string };
+
+export interface AiRun {
+  id: string;
+  assetId: string;
+  kind: "revise" | "review";
+  supply: AiSupply;
+  model: string;
+  instruction: string;
+  status: "ok" | "error" | "cancelled";
+  ver: number | null;
+  report: string | null;
+  error: string | null;
+  createdAt: number;
+}
+
 export const INBOX = "_inbox";
 
 /** A Markdown asset — opened in the editor rather than the preview iframe. */

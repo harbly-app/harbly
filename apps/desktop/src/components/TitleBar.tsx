@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  Sparkles,
   SquarePen,
 } from "lucide-react";
 import { useState } from "react";
@@ -28,6 +29,8 @@ export default function TitleBar() {
   const viewer = useStore((s) => s.viewerAsset);
   const mdWide = useStore((s) => s.mdWide);
   const toggleMdWide = useStore((s) => s.toggleMdWide);
+  const aiOpen = useStore((s) => s.aiOpen);
+  const toggleAi = useStore((s) => s.toggleAi);
   const t = makeT(useStore((s) => s.lang));
   const [scanning, setScanning] = useState(false);
 
@@ -122,6 +125,18 @@ export default function TitleBar() {
               <MoveHorizontal className="h-4 w-4" />
             </button>
           )}
+
+          <button
+            onClick={toggleAi}
+            title={`${aiOpen ? t("aiPanelHide") : t("aiPanelShow")} (⌘J)`}
+            className={`relative z-[1] grid h-8 w-8 place-items-center rounded-ctl transition ${
+              aiOpen
+                ? "bg-primary/10 text-primary"
+                : "text-sub hover:bg-side hover:text-ink"
+            }`}
+          >
+            <Sparkles className="h-4 w-4" />
+          </button>
 
           <button
             onClick={() => api.openInBrowser(viewer.id).catch(() => {})}

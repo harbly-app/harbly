@@ -349,6 +349,7 @@ impl Library {
             db.execute("DELETE FROM versions WHERE asset_id=?1", [id])?;
             db.execute("DELETE FROM fts WHERE asset_id=?1", [id])?;
             db.execute("DELETE FROM asset_tags WHERE asset_id=?1", [id])?;
+            db.execute("DELETE FROM ai_runs WHERE asset_id=?1", [id])?;
         }
         if delete_version_files {
             let _ = std::fs::remove_dir_all(self.versions_dir().join(id));

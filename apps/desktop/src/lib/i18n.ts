@@ -184,6 +184,51 @@ const zhCN: Dict = {
   enterApp: "进入 Harbly →",
   scanContinuesBg: "可随时进入，扫描在后台继续",
   countUnit: "{n} 个",
+  // AI panel
+  aiPanelShow: "打开 AI 栏",
+  aiPanelHide: "关闭 AI 栏",
+  aiSupply: "AI 供给",
+  aiSupplyLocal: "本地",
+  aiPlaceholder: "对 {name} 下指令…",
+  aiReviewPlaceholder: "补充 Review 关注点（可留空）…",
+  aiChipRevise: "改版",
+  aiChipTranslate: "翻译",
+  aiTranslateTemplate: "把页面里的文字全部翻译成英文，保持布局、样式和代码不变",
+  aiSend: "发送",
+  aiStop: "停止",
+  aiRunning: "正在运行…",
+  aiCharsStreamed: "已生成 {n} 字符",
+  aiGeneratedVer: "已生成 v{n}",
+  aiPreviewSwitched: "预览已切到新版本 · 可随时回滚",
+  aiViewDiff: "查看更改",
+  aiRollback: "回滚",
+  aiRollbackTo: "回滚到 v{n}",
+  aiRolledBack: "已回滚到 v{n} 的内容",
+  aiNoChange: "内容没有变化",
+  aiCancelledLine: "已取消",
+  aiReportTitle: "Review 报告",
+  aiEmptyTitle:
+    "配置一个 AI 供给即可就地改版与 Review：本地 agent（Claude Code / Codex）免费，或使用自己的 API Key",
+  aiConfigure: "配置 AI…",
+  aiDiffTitle: "{name} · 更改对比（v{n}）",
+  aiLocalAgents: "本地 agent",
+  aiNoAgentDetected: "未检测到 Claude Code 或 Codex CLI",
+  aiKeyPlaceholder: "粘贴 API Key",
+  aiKeyConfigured: "已配置 · 输入可替换",
+  aiKeySaved: "{name} 的 Key 已存入钥匙串",
+  aiKeyRemoved: "已删除 {name} 的 Key",
+  aiKeyRemove: "删除 Key",
+  aiModelLabel: "模型（留空用默认）",
+  aiCommand: "打开 AI 栏（改版 / Review）",
+  aiMenuItem: "AI 改版…",
+  // Version-chain labels (canonical values written by the core)
+  verInitial: "初始导入",
+  verExternal: "外部修改",
+  verEdit: "编辑",
+  verAi: "AI 改版",
+  verDuplicate: "复制副本",
+  verNew: "新建",
+  verRollbackTo: "回滚到 v{n}",
 };
 
 const zhTW: Dict = {
@@ -338,6 +383,50 @@ const zhTW: Dict = {
   enterApp: "進入 Harbly →",
   scanContinuesBg: "可隨時進入，掃描會在背景繼續",
   countUnit: "{n} 個",
+  aiPanelShow: "打開 AI 欄",
+  aiPanelHide: "關閉 AI 欄",
+  aiSupply: "AI 供給",
+  aiSupplyLocal: "本機",
+  aiPlaceholder: "對 {name} 下指令…",
+  aiReviewPlaceholder: "補充 Review 關注點（可留空）…",
+  aiChipRevise: "改版",
+  aiChipTranslate: "翻譯",
+  aiTranslateTemplate:
+    "把頁面裡的文字全部翻譯成英文，保持版面、樣式和程式碼不變",
+  aiSend: "傳送",
+  aiStop: "停止",
+  aiRunning: "正在執行…",
+  aiCharsStreamed: "已產生 {n} 字元",
+  aiGeneratedVer: "已產生 v{n}",
+  aiPreviewSwitched: "預覽已切到新版本 · 可隨時還原",
+  aiViewDiff: "檢視變更",
+  aiRollback: "還原",
+  aiRollbackTo: "還原到 v{n}",
+  aiRolledBack: "已還原到 v{n} 的內容",
+  aiNoChange: "內容沒有變化",
+  aiCancelledLine: "已取消",
+  aiReportTitle: "Review 報告",
+  aiEmptyTitle:
+    "設定一個 AI 供給即可就地改版與 Review：本機 agent（Claude Code / Codex）免費，或使用自己的 API Key",
+  aiConfigure: "設定 AI…",
+  aiDiffTitle: "{name} · 變更對比（v{n}）",
+  aiLocalAgents: "本機 agent",
+  aiNoAgentDetected: "未偵測到 Claude Code 或 Codex CLI",
+  aiKeyPlaceholder: "貼上 API Key",
+  aiKeyConfigured: "已設定 · 輸入可替換",
+  aiKeySaved: "{name} 的 Key 已存入鑰匙圈",
+  aiKeyRemoved: "已刪除 {name} 的 Key",
+  aiKeyRemove: "刪除 Key",
+  aiModelLabel: "模型（留空用預設）",
+  aiCommand: "打開 AI 欄（改版 / Review）",
+  aiMenuItem: "AI 改版…",
+  verInitial: "初始讀入",
+  verExternal: "外部修改",
+  verEdit: "編輯",
+  verAi: "AI 改版",
+  verDuplicate: "複製副本",
+  verNew: "新增",
+  verRollbackTo: "還原到 v{n}",
 };
 
 const en: Dict = {
@@ -507,6 +596,50 @@ const en: Dict = {
   scanContinuesBg:
     "You can enter anytime — scanning continues in the background",
   countUnit: "{n}",
+  aiPanelShow: "Show AI panel",
+  aiPanelHide: "Hide AI panel",
+  aiSupply: "AI supply",
+  aiSupplyLocal: "local",
+  aiPlaceholder: "Tell the AI what to do with {name}…",
+  aiReviewPlaceholder: "Extra review focus (optional)…",
+  aiChipRevise: "Revise",
+  aiChipTranslate: "Translate",
+  aiTranslateTemplate:
+    "Translate all visible text on the page into Chinese; keep layout, styles and code unchanged",
+  aiSend: "Send",
+  aiStop: "Stop",
+  aiRunning: "Running…",
+  aiCharsStreamed: "{n} characters generated",
+  aiGeneratedVer: "v{n} created",
+  aiPreviewSwitched: "Preview switched to the new version · roll back anytime",
+  aiViewDiff: "View changes",
+  aiRollback: "Roll back",
+  aiRollbackTo: "Roll back to v{n}",
+  aiRolledBack: "Rolled back to the content of v{n}",
+  aiNoChange: "Nothing changed",
+  aiCancelledLine: "Cancelled",
+  aiReportTitle: "Review report",
+  aiEmptyTitle:
+    "Set up an AI supply to revise and review in place: a local agent (Claude Code / Codex) is free, or bring your own API key",
+  aiConfigure: "Set up AI…",
+  aiDiffTitle: "{name} · changes (v{n})",
+  aiLocalAgents: "Local agents",
+  aiNoAgentDetected: "Claude Code / Codex CLI not detected",
+  aiKeyPlaceholder: "Paste API key",
+  aiKeyConfigured: "Configured · type to replace",
+  aiKeySaved: "{name} key saved to the keychain",
+  aiKeyRemoved: "{name} key removed",
+  aiKeyRemove: "Remove key",
+  aiModelLabel: "Model (empty = default)",
+  aiCommand: "Open AI panel (revise / review)",
+  aiMenuItem: "Revise with AI…",
+  verInitial: "First import",
+  verExternal: "External edit",
+  verEdit: "Edit",
+  verAi: "AI revision",
+  verDuplicate: "Duplicate",
+  verNew: "Created",
+  verRollbackTo: "Rollback to v{n}",
 };
 
 const ja: Dict = {
@@ -665,6 +798,50 @@ const ja: Dict = {
   enterApp: "Harbly を開く →",
   scanContinuesBg: "いつでも入れます — スキャンはバックグラウンドで続行",
   countUnit: "{n} 件",
+  aiPanelShow: "AI パネルを表示",
+  aiPanelHide: "AI パネルを閉じる",
+  aiSupply: "AI サプライ",
+  aiSupplyLocal: "ローカル",
+  aiPlaceholder: "{name} への指示を入力…",
+  aiReviewPlaceholder: "レビューの重点（省略可）…",
+  aiChipRevise: "改訂",
+  aiChipTranslate: "翻訳",
+  aiTranslateTemplate:
+    "ページ内のテキストをすべて日本語に翻訳し、レイアウト・スタイル・コードは変更しない",
+  aiSend: "送信",
+  aiStop: "停止",
+  aiRunning: "実行中…",
+  aiCharsStreamed: "{n} 文字を生成",
+  aiGeneratedVer: "v{n} を作成しました",
+  aiPreviewSwitched: "プレビューは新バージョンに切替済み · いつでも戻せます",
+  aiViewDiff: "変更を表示",
+  aiRollback: "ロールバック",
+  aiRollbackTo: "v{n} にロールバック",
+  aiRolledBack: "v{n} の内容に戻しました",
+  aiNoChange: "変更はありませんでした",
+  aiCancelledLine: "キャンセルしました",
+  aiReportTitle: "レビューレポート",
+  aiEmptyTitle:
+    "AI サプライを設定すると、その場で改訂とレビューができます。ローカル agent（Claude Code / Codex）は無料、または自分の API キーを使えます",
+  aiConfigure: "AI を設定…",
+  aiDiffTitle: "{name} · 変更の比較（v{n}）",
+  aiLocalAgents: "ローカル agent",
+  aiNoAgentDetected: "Claude Code / Codex CLI が見つかりません",
+  aiKeyPlaceholder: "API キーを貼り付け",
+  aiKeyConfigured: "設定済み · 入力で置き換え",
+  aiKeySaved: "{name} のキーをキーチェーンに保存しました",
+  aiKeyRemoved: "{name} のキーを削除しました",
+  aiKeyRemove: "キーを削除",
+  aiModelLabel: "モデル（空欄でデフォルト）",
+  aiCommand: "AI パネルを開く（改訂 / レビュー）",
+  aiMenuItem: "AI で改訂…",
+  verInitial: "初回読み込み",
+  verExternal: "外部での変更",
+  verEdit: "編集",
+  verAi: "AI 改訂",
+  verDuplicate: "複製",
+  verNew: "新規作成",
+  verRollbackTo: "v{n} へのロールバック",
 };
 
 const ko: Dict = {
@@ -825,6 +1002,50 @@ const ko: Dict = {
   enterApp: "Harbly 시작 →",
   scanContinuesBg: "언제든 들어갈 수 있어요 — 스캔은 백그라운드에서 계속됩니다",
   countUnit: "{n}개",
+  aiPanelShow: "AI 패널 열기",
+  aiPanelHide: "AI 패널 닫기",
+  aiSupply: "AI 공급",
+  aiSupplyLocal: "로컬",
+  aiPlaceholder: "{name}에 지시 입력…",
+  aiReviewPlaceholder: "리뷰 중점 사항 (선택)…",
+  aiChipRevise: "개정",
+  aiChipTranslate: "번역",
+  aiTranslateTemplate:
+    "페이지의 모든 텍스트를 한국어로 번역하고 레이아웃·스타일·코드는 그대로 유지",
+  aiSend: "보내기",
+  aiStop: "중지",
+  aiRunning: "실행 중…",
+  aiCharsStreamed: "{n}자 생성됨",
+  aiGeneratedVer: "v{n} 생성됨",
+  aiPreviewSwitched: "미리보기가 새 버전으로 전환됨 · 언제든 되돌리기 가능",
+  aiViewDiff: "변경 사항 보기",
+  aiRollback: "되돌리기",
+  aiRollbackTo: "v{n}(으)로 되돌리기",
+  aiRolledBack: "v{n}의 내용으로 되돌렸습니다",
+  aiNoChange: "변경된 내용이 없습니다",
+  aiCancelledLine: "취소됨",
+  aiReportTitle: "리뷰 리포트",
+  aiEmptyTitle:
+    "AI 공급을 설정하면 바로 개정과 리뷰를 할 수 있습니다. 로컬 agent(Claude Code / Codex)는 무료이며, 자신의 API 키도 사용할 수 있습니다",
+  aiConfigure: "AI 설정…",
+  aiDiffTitle: "{name} · 변경 비교 (v{n})",
+  aiLocalAgents: "로컬 agent",
+  aiNoAgentDetected: "Claude Code / Codex CLI를 찾을 수 없습니다",
+  aiKeyPlaceholder: "API 키 붙여넣기",
+  aiKeyConfigured: "설정됨 · 입력하면 교체",
+  aiKeySaved: "{name} 키를 키체인에 저장했습니다",
+  aiKeyRemoved: "{name} 키를 삭제했습니다",
+  aiKeyRemove: "키 삭제",
+  aiModelLabel: "모델 (비우면 기본값)",
+  aiCommand: "AI 패널 열기 (개정 / 리뷰)",
+  aiMenuItem: "AI로 개정…",
+  verInitial: "최초 가져오기",
+  verExternal: "외부 수정",
+  verEdit: "편집",
+  verAi: "AI 개정",
+  verDuplicate: "복제본",
+  verNew: "새로 만듦",
+  verRollbackTo: "v{n}(으)로 되돌림",
 };
 
 const es: Dict = {
@@ -996,6 +1217,51 @@ const es: Dict = {
   scanContinuesBg:
     "Puedes entrar cuando quieras — el escaneo continúa en segundo plano",
   countUnit: "{n}",
+  aiPanelShow: "Mostrar panel de IA",
+  aiPanelHide: "Ocultar panel de IA",
+  aiSupply: "Proveedor de IA",
+  aiSupplyLocal: "local",
+  aiPlaceholder: "Dile a la IA qué hacer con {name}…",
+  aiReviewPlaceholder: "Enfoque extra de la revisión (opcional)…",
+  aiChipRevise: "Revisar",
+  aiChipTranslate: "Traducir",
+  aiTranslateTemplate:
+    "Traduce todo el texto visible de la página al español; mantén el diseño, los estilos y el código sin cambios",
+  aiSend: "Enviar",
+  aiStop: "Detener",
+  aiRunning: "En ejecución…",
+  aiCharsStreamed: "{n} caracteres generados",
+  aiGeneratedVer: "v{n} creada",
+  aiPreviewSwitched:
+    "La vista previa cambió a la nueva versión · reversible en cualquier momento",
+  aiViewDiff: "Ver cambios",
+  aiRollback: "Revertir",
+  aiRollbackTo: "Revertir a v{n}",
+  aiRolledBack: "Se restauró el contenido de v{n}",
+  aiNoChange: "No hubo cambios",
+  aiCancelledLine: "Cancelado",
+  aiReportTitle: "Informe de revisión",
+  aiEmptyTitle:
+    "Configura un proveedor de IA para revisar y auditar aquí mismo: un agente local (Claude Code / Codex) es gratis, o usa tu propia clave de API",
+  aiConfigure: "Configurar IA…",
+  aiDiffTitle: "{name} · cambios (v{n})",
+  aiLocalAgents: "Agentes locales",
+  aiNoAgentDetected: "No se detectó Claude Code / Codex CLI",
+  aiKeyPlaceholder: "Pega la clave de API",
+  aiKeyConfigured: "Configurada · escribe para reemplazar",
+  aiKeySaved: "Clave de {name} guardada en el llavero",
+  aiKeyRemoved: "Clave de {name} eliminada",
+  aiKeyRemove: "Eliminar clave",
+  aiModelLabel: "Modelo (vacío = predeterminado)",
+  aiCommand: "Abrir panel de IA (revisar / auditar)",
+  aiMenuItem: "Revisar con IA…",
+  verInitial: "Primera importación",
+  verExternal: "Edición externa",
+  verEdit: "Edición",
+  verAi: "Revisión de IA",
+  verDuplicate: "Duplicado",
+  verNew: "Creado",
+  verRollbackTo: "Reversión a v{n}",
 };
 
 const DICTS: Record<Lang, Dict> = {
@@ -1022,6 +1288,14 @@ const ERRORS: Record<Lang, Dict> = {
     没有可拷贝的文件: "沒有可拷貝的檔案",
     剪贴板中没有文件: "剪貼板中沒有檔案",
     写入剪贴板失败: "寫入剪貼板失敗",
+    "未配置 API Key": "尚未設定 API Key",
+    "未找到本地 agent": "找不到本機 agent",
+    "未知的 AI 供给": "未知的 AI 供給",
+    "未知的 AI 任务类型": "未知的 AI 任務類型",
+    已取消: "已取消",
+    "AI 请求超时": "AI 要求逾時",
+    "文件过大，无法交给 AI 处理": "檔案過大，無法交給 AI 處理",
+    "AI 回复中没有可用的文件内容": "AI 回覆中沒有可用的檔案內容",
   },
   en: {
     尚未选择库: "No library selected yet",
@@ -1035,6 +1309,15 @@ const ERRORS: Record<Lang, Dict> = {
     没有可拷贝的文件: "No files to copy",
     剪贴板中没有文件: "No files on the clipboard",
     写入剪贴板失败: "Couldn’t write to the clipboard",
+    "未配置 API Key": "No API key configured",
+    "未找到本地 agent": "Local agent not found",
+    "未知的 AI 供给": "Unknown AI supply",
+    "未知的 AI 任务类型": "Unknown AI task type",
+    已取消: "Cancelled",
+    "AI 请求超时": "AI request timed out",
+    "文件过大，无法交给 AI 处理": "File is too large for the AI to handle",
+    "AI 回复中没有可用的文件内容":
+      "The AI reply contained no usable file content",
   },
   ja: {
     尚未选择库: "ライブラリが未選択です",
@@ -1048,6 +1331,14 @@ const ERRORS: Record<Lang, Dict> = {
     没有可拷贝的文件: "コピーできるファイルがありません",
     剪贴板中没有文件: "クリップボードにファイルがありません",
     写入剪贴板失败: "クリップボードへの書き込みに失敗しました",
+    "未配置 API Key": "API キーが未設定です",
+    "未找到本地 agent": "ローカル agent が見つかりません",
+    "未知的 AI 供给": "不明な AI サプライです",
+    "未知的 AI 任务类型": "不明な AI タスク種別です",
+    已取消: "キャンセルしました",
+    "AI 请求超时": "AI リクエストがタイムアウトしました",
+    "文件过大，无法交给 AI 处理": "ファイルが大きすぎて AI に渡せません",
+    "AI 回复中没有可用的文件内容": "AI の返答に使えるファイル内容がありません",
   },
   ko: {
     尚未选择库: "아직 라이브러리를 선택하지 않았습니다",
@@ -1061,6 +1352,15 @@ const ERRORS: Record<Lang, Dict> = {
     没有可拷贝的文件: "복사할 파일이 없습니다",
     剪贴板中没有文件: "클립보드에 파일이 없습니다",
     写入剪贴板失败: "클립보드 쓰기에 실패했습니다",
+    "未配置 API Key": "API 키가 설정되지 않았습니다",
+    "未找到本地 agent": "로컬 agent를 찾을 수 없습니다",
+    "未知的 AI 供给": "알 수 없는 AI 공급입니다",
+    "未知的 AI 任务类型": "알 수 없는 AI 작업 유형입니다",
+    已取消: "취소됨",
+    "AI 请求超时": "AI 요청 시간이 초과되었습니다",
+    "文件过大，无法交给 AI 处理": "파일이 너무 커서 AI에 전달할 수 없습니다",
+    "AI 回复中没有可用的文件内容":
+      "AI 응답에 사용할 수 있는 파일 내용이 없습니다",
   },
   es: {
     尚未选择库: "Aún no hay biblioteca seleccionada",
@@ -1074,6 +1374,15 @@ const ERRORS: Record<Lang, Dict> = {
     没有可拷贝的文件: "No hay archivos para copiar",
     剪贴板中没有文件: "No hay archivos en el portapapeles",
     写入剪贴板失败: "No se pudo escribir en el portapapeles",
+    "未配置 API Key": "No hay clave de API configurada",
+    "未找到本地 agent": "No se encontró el agente local",
+    "未知的 AI 供给": "Proveedor de IA desconocido",
+    "未知的 AI 任务类型": "Tipo de tarea de IA desconocido",
+    已取消: "Cancelado",
+    "AI 请求超时": "La solicitud de IA agotó el tiempo de espera",
+    "文件过大，无法交给 AI 处理": "El archivo es demasiado grande para la IA",
+    "AI 回复中没有可用的文件内容":
+      "La respuesta de la IA no contiene contenido de archivo utilizable",
   },
 };
 
@@ -1115,6 +1424,71 @@ export const tr: TFn = (key, params) => makeT(current)(key, params);
 /** Localize backend error strings: exact-match known messages, return unknown ones as-is */
 export function localizeError(msg: string): string {
   return ERRORS[current][msg] ?? msg;
+}
+
+/** AI engine errors carry a fixed canonical prefix + dynamic detail
+ * ("网络错误: <detail>") — localize the prefix, keep the detail verbatim.
+ * (`| undefined`: keys are open-ended, lookups can miss.) */
+const AI_ERR_PREFIX: Record<string, Partial<Record<Lang, string>> | undefined> =
+  {
+    网络错误: {
+      "zh-TW": "網路錯誤",
+      en: "Network error",
+      ja: "ネットワークエラー",
+      ko: "네트워크 오류",
+      es: "Error de red",
+    },
+    "AI 服务错误": {
+      "zh-TW": "AI 服務錯誤",
+      en: "AI provider error",
+      ja: "AI プロバイダエラー",
+      ko: "AI 서비스 오류",
+      es: "Error del proveedor de IA",
+    },
+    "本地 agent 出错": {
+      "zh-TW": "本機 agent 發生錯誤",
+      en: "Local agent error",
+      ja: "ローカル agent エラー",
+      ko: "로컬 agent 오류",
+      es: "Error del agente local",
+    },
+    "IO 错误": {
+      "zh-TW": "IO 錯誤",
+      en: "IO error",
+      ja: "IO エラー",
+      ko: "IO 오류",
+      es: "Error de E/S",
+    },
+  };
+
+export function localizeAiError(msg: string): string {
+  const exact = ERRORS[current][msg];
+  if (exact) return exact;
+  const idx = msg.indexOf(": ");
+  if (idx > 0) {
+    const prefix = msg.slice(0, idx);
+    const loc = AI_ERR_PREFIX[prefix]?.[current];
+    if (loc) return `${loc}: ${msg.slice(idx + 2)}`;
+  }
+  return msg;
+}
+
+/** Version-chain labels are canonical Chinese written by the core
+ * ("初始导入" / "AI 改版" / "回滚到 v3" …) — map the known ones per language. */
+const VER_LABEL_KEY: Record<string, string> = {
+  初始导入: "verInitial",
+  外部修改: "verExternal",
+  编辑: "verEdit",
+  "AI 改版": "verAi",
+  复制副本: "verDuplicate",
+  新建: "verNew",
+};
+
+export function localizeVerLabel(label: string, t: TFn): string {
+  const rollback = /^回滚到 v(\d+)$/.exec(label);
+  if (rollback) return t("verRollbackTo", { n: Number(rollback[1]) });
+  const key = VER_LABEL_KEY[label];
+  return key ? t(key) : label;
 }
 
 /** Guess from the system language on first launch */

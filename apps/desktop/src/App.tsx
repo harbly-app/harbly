@@ -196,6 +196,14 @@ export default function App() {
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
         useStore.getState().toggleSidebar();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
+        // AI panel: toggle in the viewer; from the grid, open it on the single
+        // selected asset
+        e.preventDefault();
+        const st = useStore.getState();
+        if (st.phase !== "main") return;
+        if (st.viewerAsset) st.toggleAi();
+        else if (st.selIds.length === 1) st.openAiFor(st.selIds[0]);
       } else if ((e.metaKey || e.ctrlKey) && e.key === ",") {
         e.preventDefault();
         const st = useStore.getState();

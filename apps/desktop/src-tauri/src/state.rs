@@ -27,6 +27,9 @@ pub struct AppState {
     pub redo_stack: Mutex<Vec<OpEntry>>,
     /// UI language (zh-CN/zh-TW/en/ja/ko/es), persisted in config.json
     pub lang: Mutex<String>,
+    /// Running AI tasks: frontend job id → cancel flag. Entries are removed
+    /// when the run finishes; ai_cancel flips the flag cooperatively.
+    pub ai_jobs: Mutex<std::collections::HashMap<String, harbly_ai::CancelFlag>>,
 }
 
 /// A completed file operation. Executing it (undo and redo share one executor)

@@ -11,6 +11,7 @@ import {
   FolderInput,
   FolderOpen,
   PencilLine,
+  Sparkles,
   Tag as TagIcon,
   Trash2,
 } from "lucide-react";
@@ -515,6 +516,12 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
                 icon={<TagIcon className="h-3.5 w-3.5" />}
                 label={t("tagsMenu")}
                 onClick={() => st().setModal({ kind: "tags", asset: a })}
+              />
+              <MItem
+                icon={<Sparkles className="h-3.5 w-3.5" />}
+                label={t("aiMenuItem")}
+                hint="⌘J"
+                onClick={() => st().openAiFor(a.id)}
               />
               <MItem
                 icon={<ClipboardCopy className="h-3.5 w-3.5" />}

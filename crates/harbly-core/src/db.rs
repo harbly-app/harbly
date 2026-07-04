@@ -54,6 +54,21 @@ fn migrate(conn: &Connection) -> Result<()> {
             PRIMARY KEY(asset_id, tag)
         );
         CREATE INDEX IF NOT EXISTS idx_tags_tag ON asset_tags(tag);
+
+        CREATE TABLE IF NOT EXISTS ai_runs(
+            id          TEXT PRIMARY KEY,
+            asset_id    TEXT NOT NULL,
+            kind        TEXT NOT NULL,
+            supply      TEXT NOT NULL,
+            model       TEXT NOT NULL DEFAULT '',
+            instruction TEXT NOT NULL,
+            status      TEXT NOT NULL,
+            ver         INTEGER,
+            report      TEXT,
+            error       TEXT,
+            created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ai_runs_asset ON ai_runs(asset_id, created_at);
         "#,
     )?;
     conn.execute(

@@ -1,3 +1,4 @@
+mod ai;
 mod commands;
 mod i18n;
 mod md_template;
@@ -67,6 +68,14 @@ pub fn run() {
             commands::forward_edit_action,
             commands::set_language,
             commands::get_language,
+            ai::ai_detect_agents,
+            ai::ai_key_status,
+            ai::ai_set_key,
+            ai::ai_get_config,
+            ai::ai_set_config,
+            ai::ai_runs_list,
+            ai::ai_run,
+            ai::ai_cancel,
         ])
         .setup(|app| {
             use tauri::Manager;

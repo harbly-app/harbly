@@ -15,8 +15,11 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-drag = "2"
+harbly-ai = { path = "../../../crates/harbly-ai" }
 harbly-core = { path = "../../../crates/harbly-core" }
+keyring = { version = "3", features = ["apple-native"] }
 notify = "7"
+tokio = { version = "1", features = ["macros"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"

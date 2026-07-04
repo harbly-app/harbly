@@ -208,6 +208,22 @@ textarea,
   display: none;
 }
 
+/* AI panel: fixed 320px column (design token 300–324). On narrow windows it
+   overlays the preview's right edge instead of squeezing the content pane —
+   the viewer wrapper is position:relative for exactly this. */
+.ai-panel {
+  width: 320px;
+}
+@media (max-width: 1080px) {
+  .ai-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    box-shadow: -12px 0 32px -18px rgb(0 0 0 / 0.35);
+  }
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;

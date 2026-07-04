@@ -7,14 +7,17 @@ import {
   Monitor,
   Moon,
   RefreshCw,
+  Sparkles,
   Sun,
+  X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { api, versionUrl } from "../lib/api";
 import { LANGS, makeT } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import type { ThemePref } from "../lib/theme";
-import type { TreeNode } from "../lib/types";
+import type { AgentInfo, AiConfig, ByokProvider, TreeNode } from "../lib/types";
+import { BYOK_PROVIDERS } from "../lib/types";
 
 export default function Modals() {
   const modal = useStore((s) => s.modal);
@@ -40,7 +43,7 @@ export default function Modals() {
       onMouseDown={() => setModal(null)}
     >
       <div
-        className="w-[420px] rounded-card border border-line bg-card p-5 shadow-2xl"
+        className={`${modal.kind === "aiDiff" ? "flex h-[82vh] w-[86vw] max-w-[1100px] flex-col" : "w-[420px]"} rounded-card border border-line bg-card p-5 shadow-2xl`}
         onMouseDown={(e) => e.stopPropagation()}
       >
         {modal.kind === "move" && <Move />}
@@ -48,6 +51,7 @@ export default function Modals() {
         {modal.kind === "tags" && <Tags />}
         {modal.kind === "confirmDeleteFolder" && <ConfirmDeleteFolder />}
         {modal.kind === "settings" && <Settings />}
+        {modal.kind === "aiDiff" && <AiDiff />}
       </div>
     </div>
   );
@@ -287,6 +291,199 @@ function Tags() {
   );
 }
 
+const BYOK_LABEL: Record<ByokProvider, string> = {
+  anthropic: "Anthropic API",
+  openai: "OpenAI API",
+  openrouter: "OpenRouter",
+};
+/** Placeholder = the backend fallback model, so an empty field is honest */
+const BYOK_DEFAULT_MODEL: Record<ByokProvider, string> = {
+  anthropic: "claude-sonnet-5",
+  openai: "gpt-5.1",
+  openrouter: "anthropic/claude-sonnet-5",
+};
+
+/** AI section of settings: local agent detection status (read-only) + one
+ * key/model pair per BYOK provider. Keys go straight to the OS keychain. */
+function AiSettings() {
+  const t = makeT(useStore((s) => s.lang));
+  const showToast = useStore((s) => s.showToast);
+  const bumpAiConfig = useStore((s) => s.bumpAiConfig);
+  const [agents, setAgents] = useState<AgentInfo[] | null>(null);
+  const [keys, setKeys] = useState<Record<string, boolean>>({});
+  const [config, setConfig] = useState<AiConfig>({});
+  const [drafts, setDrafts] = useState<Partial<Record<ByokProvider, string>>>(
+    {},
+  );
+
+  useEffect(() => {
+    void Promise.all([
+      api.aiDetectAgents().catch(() => [] as AgentInfo[]),
+      api.aiKeyStatus().catch(() => ({})),
+      api.aiGetConfig().catch(() => ({})),
+    ]).then(([a, k, c]) => {
+      setAgents(a);
+      setKeys(k);
+      setConfig(c);
+    });
+  }, []);
+
+  const saveKey = async (p: ByokProvider) => {
+    const draft = drafts[p]?.trim();
+    if (!draft) return; // deletion goes through the explicit ✕ button
+    try {
+      await api.aiSetKey(p, draft);
+      setKeys((k) => ({ ...k, [p]: true }));
+      setDrafts((d) => ({ ...d, [p]: "" }));
+      bumpAiConfig();
+      showToast(t("aiKeySaved", { name: BYOK_LABEL[p] }));
+    } catch (e) {
+      showToast(String(e));
+    }
+  };
+
+  const removeKey = async (p: ByokProvider) => {
+    try {
+      await api.aiSetKey(p, "");
+      setKeys((k) => ({ ...k, [p]: false }));
+      bumpAiConfig();
+      showToast(t("aiKeyRemoved", { name: BYOK_LABEL[p] }));
+    } catch (e) {
+      showToast(String(e));
+    }
+  };
+
+  const saveModel = (p: ByokProvider, model: string) => {
+    // Rebuild without empty entries (an empty field means "use the default")
+    const models = Object.fromEntries(
+      Object.entries({ ...config.models, [p]: model.trim() }).filter(
+        ([, v]) => v,
+      ),
+    ) as AiConfig["models"];
+    const next = { ...config, models };
+    setConfig(next);
+    api
+      .aiSetConfig(next)
+      .then(() => bumpAiConfig())
+      .catch(() => {});
+  };
+
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center gap-1 text-[11px] font-bold text-sub">
+        <Sparkles className="h-3 w-3" />
+        AI
+      </div>
+
+      <div className="rounded-ctl border border-line bg-side px-3 py-2 text-xs">
+        <div className="mb-1 text-[10.5px] font-bold text-sub">
+          {t("aiLocalAgents")}
+        </div>
+        {agents === null ? (
+          <div className="text-sub">…</div>
+        ) : agents.length === 0 ? (
+          <div className="text-sub">{t("aiNoAgentDetected")}</div>
+        ) : (
+          agents.map((a) => (
+            <div key={a.kind} className="flex items-baseline gap-2">
+              <span className="font-bold">
+                {a.kind === "claude" ? "Claude Code" : "Codex CLI"}
+              </span>
+              <span className="truncate text-[10.5px] text-sub">
+                {a.version ?? a.path}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="mt-2 space-y-2">
+        {agents !== null &&
+          BYOK_PROVIDERS.map((p) => (
+            <div key={p} className="flex items-center gap-1.5">
+              <span className="w-[92px] shrink-0 text-[11px] text-sub2">
+                {BYOK_LABEL[p]}
+              </span>
+              <div className="relative min-w-0 flex-1">
+                <input
+                  type="password"
+                  value={drafts[p] ?? ""}
+                  onChange={(e) =>
+                    setDrafts((d) => ({ ...d, [p]: e.target.value }))
+                  }
+                  onBlur={() => void saveKey(p)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void saveKey(p);
+                  }}
+                  placeholder={
+                    keys[p] ? t("aiKeyConfigured") : t("aiKeyPlaceholder")
+                  }
+                  className={`h-7 w-full rounded-ctl border bg-card px-2 pr-6 text-[11px] outline-none focus:border-primary ${keys[p] ? "border-ok/40" : "border-line"}`}
+                />
+                {keys[p] && (
+                  <button
+                    onClick={() => void removeKey(p)}
+                    title={t("aiKeyRemove")}
+                    className="absolute top-1/2 right-1 grid h-5 w-5 -translate-y-1/2 place-items-center rounded text-sub transition hover:bg-side hover:text-danger"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+              <input
+                defaultValue={config.models?.[p] ?? ""}
+                onBlur={(e) => saveModel(p, e.target.value)}
+                placeholder={BYOK_DEFAULT_MODEL[p]}
+                title={t("aiModelLabel")}
+                className="h-7 w-[150px] shrink-0 rounded-ctl border border-line bg-card px-2 text-[11px] outline-none focus:border-primary"
+              />
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+}
+
+/** Side-by-side sandboxed render of two version snapshots. The right pane is
+ * the version under inspection; the left is its predecessor (hidden for v1). */
+function AiDiff() {
+  const modal = useStore((s) => s.modal);
+  const t = makeT(useStore((s) => s.lang));
+  const m = modal?.kind === "aiDiff" ? modal : null;
+  if (!m) return null;
+
+  const pane = (ver: number, highlight: boolean) => (
+    <div className="flex min-w-0 flex-1 flex-col">
+      <div
+        className={`mb-1.5 text-[11px] font-bold ${highlight ? "text-primary" : "text-sub"}`}
+      >
+        v{ver}
+      </div>
+      {/* Document canvas stays white in both themes (same rule as the viewer) */}
+      <div
+        className={`min-h-0 flex-1 overflow-hidden rounded-ctl border bg-white ${highlight ? "border-primary/40" : "border-line"}`}
+      >
+        <iframe
+          src={versionUrl(m.asset.id, ver)}
+          sandbox="allow-scripts allow-same-origin"
+          className="h-full w-full border-0"
+          title={`v${ver}`}
+        />
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <Title>{t("aiDiffTitle", { name: m.asset.fileName, n: m.toVer })}</Title>
+      <div className="flex min-h-0 flex-1 gap-3">
+        {m.fromVer != null && pane(m.fromVer, false)}
+        {pane(m.toVer, true)}
+      </div>
+    </>
+  );
+}
+
 function Settings() {
   const root = useStore((s) => s.root);
   const showToast = useStore((s) => s.showToast);
@@ -380,6 +577,8 @@ function Settings() {
             ))}
           </div>
         </div>
+
+        <AiSettings />
 
         <div>
           <div className="mb-1.5 text-[11px] font-bold text-sub">

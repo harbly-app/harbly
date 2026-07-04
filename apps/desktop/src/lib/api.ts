@@ -1,5 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
+  AgentInfo,
+  AiConfig,
+  AiEvent,
+  AiRun,
   AssetMeta,
   ImportResult,
   ScanSummary,
@@ -7,6 +11,7 @@ import type {
   SortKey,
   TagInfo,
   TreeNode,
+  VersionInfo,
 } from "./types";
 
 // Commands whose Rust side returns `()` resolve to `null` in the webview,
@@ -80,6 +85,35 @@ export const api = {
     invoke<string | null>("export_folder", { rel }),
   thumbsRebuild: () => invoke<null>("thumbs_rebuild"),
   requestThumbs: (ids: string[]) => invoke<null>("request_thumbs", { ids }),
+  listVersions: (id: string) => invoke<VersionInfo[]>("list_versions", { id }),
+  restoreVersion: (id: string, ver: number) =>
+    invoke<null>("restore_version", { id, ver }),
+  // AI
+  aiDetectAgents: () => invoke<AgentInfo[]>("ai_detect_agents"),
+  aiKeyStatus: () => invoke<Record<string, boolean>>("ai_key_status"),
+  aiSetKey: (provider: string, key: string) =>
+    invoke<null>("ai_set_key", { provider, key }),
+  aiGetConfig: () => invoke<AiConfig>("ai_get_config"),
+  aiSetConfig: (config: AiConfig) => invoke<null>("ai_set_config", { config }),
+  aiRunsList: (id: string, limit?: number) =>
+    invoke<AiRun[]>("ai_runs_list", { id, limit: limit ?? null }),
+  aiCancel: (job: string) => invoke<null>("ai_cancel", { job }),
+  /** Long-running: resolves when the task finishes; progress streams via `onEvent`. */
+  aiRun: (
+    args: {
+      job: string;
+      id: string;
+      kind: "revise" | "review";
+      instruction: string;
+      supply: string;
+      model?: string;
+    },
+    onEvent: (e: AiEvent) => void,
+  ) => {
+    const ch = new Channel<AiEvent>();
+    ch.onmessage = onEvent;
+    return invoke<AiRun>("ai_run", { ...args, onEvent: ch });
+  },
 };
 
 export const assetUrl = (id: string) =>
@@ -96,6 +130,10 @@ export const relAssetUrl = (id: string, rel: string) =>
 
 export const thumbUrl = (hash: string) =>
   `harbly-thumb://localhost/${hash}.jpg`;
+
+/** Sandboxed URL of a historical version snapshot (same CSP as `assetUrl`) */
+export const versionUrl = (id: string, ver: number) =>
+  `harbly-asset://localhost/version/${encodeURIComponent(id)}/${ver}`;
 
 export function timeAgo(epochSec: number): string {
   const s = Math.max(0, Math.floor(Date.now() / 1000) - epochSec);

@@ -21,7 +21,7 @@ fn read_config(app: &AppHandle) -> serde_json::Value {
         .unwrap_or_else(|| serde_json::json!({}))
 }
 
-fn write_config_key(app: &AppHandle, key: &str, value: serde_json::Value) {
+pub(crate) fn write_config_key(app: &AppHandle, key: &str, value: serde_json::Value) {
     if let Some(p) = config_path(app) {
         let mut v = read_config(app);
         if !v.is_object() {
@@ -30,6 +30,11 @@ fn write_config_key(app: &AppHandle, key: &str, value: serde_json::Value) {
         v[key] = value;
         let _ = std::fs::write(p, v.to_string());
     }
+}
+
+/// One top-level config.json value (used by the AI settings section).
+pub(crate) fn read_config_value(app: &AppHandle, key: &str) -> Option<serde_json::Value> {
+    read_config(app).get(key).cloned()
 }
 
 fn saved_library(app: &AppHandle) -> Option<PathBuf> {

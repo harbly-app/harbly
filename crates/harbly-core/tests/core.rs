@@ -452,3 +452,85 @@ fn finder_tags_xattr_interop() {
     lib.set_tags(&id, &[]).unwrap();
     assert!(harbly_core::read_file_tags(&abs).is_empty());
 }
+
+#[test]
+fn ai_apply_output_appends_version_and_reindexes() {
+    let (_tmp, lib) = setup();
+    let root = lib.root().to_path_buf();
+    fs::write(root.join("page.html"), html("Pricing", "旧的定价方案")).unwrap();
+    lib.scan(|_| {}).unwrap();
+    let a = lib.asset_by_rel("page.html").unwrap();
+    assert_eq!(a.ver_count, 1);
+
+    let ver = lib
+        .apply_ai_output(&a.id, &html("Pricing", "全新的深色定价"), "AI 改版")
+        .unwrap();
+    assert_eq!(ver, 2);
+
+    // File content, version chain, and FTS index all reflect the new content
+    let a2 = lib.asset(&a.id).unwrap();
+    assert_eq!(a2.ver_count, 2);
+    let versions = lib.list_versions(&a.id).unwrap();
+    assert_eq!(versions[0].label, "AI 改版");
+    assert!(lib.read_asset_text(&a.id).unwrap().contains("深色定价"));
+    assert_eq!(lib.search("深色").unwrap().len(), 1);
+
+    // Identical content again → dedup guard keeps the chain unchanged
+    let same = lib
+        .apply_ai_output(&a.id, &html("Pricing", "全新的深色定价"), "AI 改版")
+        .unwrap();
+    assert_eq!(same, 2);
+    assert_eq!(lib.asset(&a.id).unwrap().ver_count, 2);
+
+    // Rollback restores v1 content as a new version (history never rewritten)
+    lib.restore_version(&a.id, 1).unwrap();
+    assert!(lib.read_asset_text(&a.id).unwrap().contains("旧的定价方案"));
+    assert_eq!(lib.asset(&a.id).unwrap().ver_count, 3);
+}
+
+#[test]
+fn ai_runs_record_list_and_cleanup() {
+    let (_tmp, lib) = setup();
+    let root = lib.root().to_path_buf();
+    fs::write(root.join("a.html"), html("A", "内容")).unwrap();
+    lib.scan(|_| {}).unwrap();
+    let a = lib.asset_by_rel("a.html").unwrap();
+
+    let rec = lib
+        .record_ai_run(&harbly_core::NewAiRun {
+            asset_id: a.id.clone(),
+            kind: "revise".into(),
+            supply: "anthropic".into(),
+            model: "claude-sonnet-5".into(),
+            instruction: "改成深色".into(),
+            status: "ok".into(),
+            ver: Some(2),
+            report: None,
+            error: None,
+        })
+        .unwrap();
+    assert_eq!(rec.status, "ok");
+    lib.record_ai_run(&harbly_core::NewAiRun {
+        asset_id: a.id.clone(),
+        kind: "review".into(),
+        supply: "claude".into(),
+        model: String::new(),
+        instruction: String::new(),
+        status: "ok".into(),
+        ver: None,
+        report: Some("# 报告\n一切正常".into()),
+        error: None,
+    })
+    .unwrap();
+
+    let runs = lib.list_ai_runs(&a.id, 50).unwrap();
+    assert_eq!(runs.len(), 2);
+    // Newest first: the review comes back on top
+    assert_eq!(runs[0].kind, "review");
+    assert_eq!(runs[0].report.as_deref(), Some("# 报告\n一切正常"));
+    assert_eq!(runs[1].ver, Some(2));
+
+    // Trashing the asset clears its run records too
+    lib.trash_asset(&a.id).unwrap();
+    assert!(lib.list_ai_runs(&a.id, 50).unwrap().is_empty());
+}
