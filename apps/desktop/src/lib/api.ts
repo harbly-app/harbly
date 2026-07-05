@@ -67,6 +67,7 @@ export const api = {
   getLanguage: () => invoke<string>("get_language"),
   revealAsset: (id: string) => invoke<null>("reveal_asset", { id }),
   openInBrowser: (id: string) => invoke<null>("open_in_browser", { id }),
+  openUrl: (url: string) => invoke<null>("open_url", { url }),
   revealFolder: (rel: string) => invoke<null>("reveal_folder", { rel }),
   createFolder: (parent: string, name: string) =>
     invoke<string>("create_folder", { parent, name }),

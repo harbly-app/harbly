@@ -685,3 +685,45 @@ fn ai_tool_surface_reads_writes_and_records() {
         )
         .is_err());
 }
+
+#[test]
+fn ai_tools_list_and_delete() {
+    let (_tmp, lib) = setup();
+    let root = lib.root().to_path_buf();
+    fs::write(root.join("full.html"), html("Full", "有内容")).unwrap();
+    fs::write(root.join("empty.html"), "").unwrap();
+    lib.scan(|_| {}).unwrap();
+    let ctx = harbly_core::AiToolCtx::default();
+
+    // Enumeration exposes sizes — this is how "find the empty files" works
+    let (v, w) = lib
+        .execute_ai_tool("list_assets", &serde_json::json!({}), &ctx)
+        .unwrap();
+    assert!(w.is_none());
+    assert_eq!(v["total"], 2);
+    let assets = v["assets"].as_array().unwrap();
+    let empty = assets
+        .iter()
+        .find(|a| a["file_name"] == "empty.html")
+        .unwrap();
+    assert_eq!(empty["size_bytes"], 0);
+    let empty_id = empty["asset_id"].as_str().unwrap().to_string();
+
+    // Deletion goes to the system Trash and cleans the index
+    let (v, w) = lib
+        .execute_ai_tool(
+            "delete_asset",
+            &serde_json::json!({ "asset_id": empty_id }),
+            &ctx,
+        )
+        .unwrap();
+    assert_eq!(v["deleted"], "empty.html");
+    assert!(!w.unwrap().created);
+    assert!(lib.asset(&empty_id).is_err());
+    assert_eq!(lib.total_count().unwrap(), 1);
+
+    // Folder traversal rejected on list too
+    assert!(lib
+        .execute_ai_tool("list_assets", &serde_json::json!({"folder": "../x"}), &ctx)
+        .is_err());
+}

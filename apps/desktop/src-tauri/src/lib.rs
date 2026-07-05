@@ -44,6 +44,7 @@ pub fn run() {
             commands::assets_trash,
             commands::reveal_asset,
             commands::open_in_browser,
+            commands::open_url,
             commands::reveal_folder,
             commands::create_folder,
             commands::folder_rename,

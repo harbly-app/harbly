@@ -244,13 +244,16 @@ pub(crate) fn system_prompt(task: &SessionTask) -> String {
     let mut s = format!(
         "You are the AI workbench of Harbly, a local-first manager for single-file HTML and \
          Markdown assets. You operate on the user's library exclusively through tools: \
-         search_library, read_asset, write_asset, create_asset.\n\
+         search_library (full text), list_assets (enumeration with sizes), read_asset, \
+         write_asset, create_asset, delete_asset.\n\
          Rules:\n\
          - Read an asset before modifying it. write_asset must carry the COMPLETE new file \
            content; every write becomes a new version the user can inspect and roll back.\n\
-         - Write only when the user asks for changes; questions and reviews get prose answers.\n\
+         - Write or delete only when the user asks for it; questions and reviews get prose \
+           answers. Deletions go to the system Trash (user-recoverable).\n\
          - Keep files self-contained; do not introduce external network resources unless asked.\n\
-         - Never invent asset ids — obtain them from search_library or the context below.\n\
+         - Never invent asset ids — obtain them from search_library/list_assets or the context \
+           below.\n\
          - Respond in {lang}.",
         lang = task.reply_lang,
     );

@@ -36,7 +36,7 @@ fn stdio_roundtrip_initialize_list_call() {
     assert_eq!(resp["result"]["serverInfo"]["name"], "harbly");
 
     let resp = rpc(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);
-    assert_eq!(resp["result"]["tools"].as_array().unwrap().len(), 4);
+    assert_eq!(resp["result"]["tools"].as_array().unwrap().len(), 6);
 
     let resp = rpc(
         r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_library","arguments":{"query":"alpha"}}}"#,

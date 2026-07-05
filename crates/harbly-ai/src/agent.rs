@@ -195,9 +195,15 @@ pub(crate) async fn run_claude_turn(
     if let Some(cfg) = &config_path {
         cmd.arg("--mcp-config").arg(cfg);
         // Pre-approve ONLY the Harbly tools (both server- and tool-level
-        // patterns, for CLI-version tolerance). Everything else — raw file
-        // tools, Bash — stays unapproved and is denied in print mode.
+        // patterns, for CLI-version tolerance)...
         cmd.args(["--allowedTools", "mcp__harbly,mcp__harbly__*"]);
+        // ...and explicitly forbid raw file/exec access: the user's own
+        // global Claude Code permission rules would otherwise leak into this
+        // headless run (observed: Bash find escaping the library).
+        cmd.args([
+            "--disallowedTools",
+            "Bash,Read,Edit,Write,MultiEdit,NotebookEdit,Glob,Grep",
+        ]);
     }
     if let Some(id) = resume {
         cmd.args(["--resume", id]);

@@ -13,6 +13,8 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { api, timeAgo } from "../lib/api";
 import { localizeAiError, localizeVerLabel, makeT } from "../lib/i18n";
 import type { TFn } from "../lib/i18n";
@@ -880,8 +882,26 @@ function MessageRow({
           ))}
         </div>
       )}
-      <div className="text-xs leading-relaxed whitespace-pre-wrap select-text">
-        {m.content}
+      <div className="ai-md text-xs leading-relaxed select-text">
+        <Markdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            // The webview must never navigate; links open in the browser
+            a: ({ href, children }) => (
+              <a
+                href={href}
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (href) api.openUrl(href).catch(() => {});
+                }}
+              >
+                {children}
+              </a>
+            ),
+          }}
+        >
+          {m.content}
+        </Markdown>
       </div>
       {writes.map((w) => (
         <div

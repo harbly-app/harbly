@@ -182,7 +182,7 @@ mod tests {
         )
         .unwrap();
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 6);
         assert!(tools.iter().any(|t| t["name"] == "write_asset"));
 
         let resp = handle(

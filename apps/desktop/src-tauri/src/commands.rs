@@ -1234,6 +1234,27 @@ pub async fn forward_edit_action(app: AppHandle, action: String) -> Result<(), S
     })?
 }
 
+/// Open an external link in the default browser (used by links inside AI
+/// replies — the webview itself must never navigate).
+#[tauri::command]
+pub async fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err("仅支持 http/https 链接".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("暂仅支持 macOS".to_string())
+    }
+}
+
 fn open_with_system(path: &std::path::Path, reveal: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {

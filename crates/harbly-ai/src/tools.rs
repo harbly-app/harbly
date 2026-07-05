@@ -6,9 +6,11 @@
 use serde_json::{json, Value};
 
 pub const SEARCH: &str = "search_library";
+pub const LIST: &str = "list_assets";
 pub const READ: &str = "read_asset";
 pub const WRITE: &str = "write_asset";
 pub const CREATE: &str = "create_asset";
+pub const DELETE: &str = "delete_asset";
 
 pub struct ToolSpec {
     pub name: &'static str,
@@ -29,6 +31,19 @@ pub fn tool_specs() -> Vec<ToolSpec> {
                     "query": { "type": "string", "description": "Search keywords" }
                 },
                 "required": ["query"]
+            }),
+        },
+        ToolSpec {
+            name: LIST,
+            description: "List assets with file name, folder, title, size in bytes and version \
+                          count (capped at 300, newest first for the whole library). Use this to \
+                          enumerate files — including empty ones full-text search cannot find.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "folder": { "type": "string", "description": "Library-relative folder to list; empty or omitted = the whole library" }
+                },
+                "required": []
             }),
         },
         ToolSpec {
@@ -71,6 +86,19 @@ pub fn tool_specs() -> Vec<ToolSpec> {
                 "required": ["name", "content"]
             }),
         },
+        ToolSpec {
+            name: DELETE,
+            description: "Move an asset to the system Trash (the user can restore it from \
+                          Finder). Confirm the target via list_assets/read_asset first; never \
+                          guess ids.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "asset_id": { "type": "string" }
+                },
+                "required": ["asset_id"]
+            }),
+        },
     ]
 }
 
@@ -82,7 +110,11 @@ pub fn call_label(name: &str, args: &Value) -> String {
         SEARCH => args["query"]
             .as_str()
             .map(|q| format!("\u{201c}{q}\u{201d}")),
-        READ | WRITE => args["asset_id"].as_str().map(short_id),
+        LIST => args["folder"]
+            .as_str()
+            .filter(|f| !f.is_empty())
+            .map(String::from),
+        READ | WRITE | DELETE => args["asset_id"].as_str().map(short_id),
         CREATE => args["name"].as_str().map(String::from),
         _ => None,
     };
@@ -103,7 +135,7 @@ mod tests {
     #[test]
     fn specs_are_complete_and_valid_schemas() {
         let specs = tool_specs();
-        assert_eq!(specs.len(), 4);
+        assert_eq!(specs.len(), 6);
         for s in &specs {
             assert_eq!(s.schema["type"], "object");
             assert!(s.schema["required"].is_array());

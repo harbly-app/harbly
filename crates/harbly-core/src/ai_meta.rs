@@ -97,7 +97,8 @@ pub struct AiToolCtx {
     pub session_id: Option<String>,
 }
 
-/// What a write-tool call did — callers use it to refresh UI / enqueue thumbs.
+/// What a mutating tool call did — callers use it to refresh UI / enqueue
+/// thumbs. `ver` is 0 for deletions (there is no version to point at).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiWriteOutcome {
@@ -209,6 +210,52 @@ impl Library {
                 .ok_or_else(|| format!("missing required argument: {key}"))
         };
         match name {
+            "list_assets" => {
+                let folder = args["folder"].as_str().unwrap_or("");
+                if folder.split('/').any(|c| c == "..") {
+                    return Err("invalid folder".to_string());
+                }
+                // "" lists the whole library recursively (inbox excluded by
+                // list_assets' own convention only for direct folders, so use
+                // all_assets for the root to include everything)
+                let assets = if folder.is_empty() {
+                    self.all_assets().map_err(|e| e.to_string())?
+                } else {
+                    self.list_assets(folder, crate::SortKey::Name)
+                        .map_err(|e| e.to_string())?
+                };
+                let total = assets.len();
+                let items: Vec<_> = assets
+                    .iter()
+                    .take(300)
+                    .map(|a| {
+                        json!({
+                            "asset_id": a.id,
+                            "file_name": a.file_name,
+                            "folder": a.folder,
+                            "title": a.title,
+                            "size_bytes": a.size_bytes,
+                            "ver_count": a.ver_count,
+                        })
+                    })
+                    .collect();
+                Ok((json!({ "total": total, "assets": items }), None))
+            }
+            "delete_asset" => {
+                let id = arg_str("asset_id")?;
+                let a = self.asset(&id).map_err(|_| "asset not found".to_string())?;
+                // System Trash, not oblivion: the user can restore from Finder.
+                self.trash_asset(&id).map_err(|e| e.to_string())?;
+                Ok((
+                    json!({ "deleted": a.file_name, "note": "moved to system Trash (user-recoverable)" }),
+                    Some(AiWriteOutcome {
+                        asset_id: id,
+                        file_name: a.file_name,
+                        ver: 0,
+                        created: false,
+                    }),
+                ))
+            }
             "search_library" => {
                 let query = arg_str("query")?;
                 let hits = self.search(&query).map_err(|e| e.to_string())?;

@@ -643,7 +643,7 @@ mod tests {
 
         // Current generation: adaptive thinking + output_config effort
         let body = anthropic_body(&t, "claude-sonnet-5", &anthropic_history(&t));
-        assert_eq!(body["tools"].as_array().unwrap().len(), 4);
+        assert_eq!(body["tools"].as_array().unwrap().len(), 6);
         assert_eq!(body["thinking"]["type"], "adaptive");
         assert_eq!(body["output_config"]["effort"], "high");
         assert_eq!(
