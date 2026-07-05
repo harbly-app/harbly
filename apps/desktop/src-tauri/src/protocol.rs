@@ -23,7 +23,12 @@ const MD_CSP: &str = "default-src 'none'; script-src 'none'; style-src 'unsafe-i
     img-src harbly-asset: data: blob:; font-src harbly-asset: data:; media-src harbly-asset: data: blob:; \
     connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'";
 
-const CSP_REPORTER: &str = "<script>(function(){var n=0;addEventListener('securitypolicyviolation',function(e){n++;try{parent.postMessage({__harbly:'csp',count:n,uri:String(e.blockedURI||'')},'*')}catch(_){}})})();</script>";
+/// Injected into every previewed page: (1) CSP-violation counter for the
+/// "N blocked" pill; (2) app-shortcut forwarding — the preview iframe is
+/// cross-origin, so once it has focus the host window would never see
+/// ⌘J/⌘K/⌘B keydowns. Forwarding is one-way and limited to benign UI toggles,
+/// so a malicious page spoofing the message can at worst flip a panel.
+const CSP_REPORTER: &str = "<script>(function(){var n=0;addEventListener('securitypolicyviolation',function(e){n++;try{parent.postMessage({__harbly:'csp',count:n,uri:String(e.blockedURI||'')},'*')}catch(_){}});addEventListener('keydown',function(e){var k=String(e.key||'').toLowerCase();if((e.metaKey||e.ctrlKey)&&(k==='j'||k==='k'||k==='b')){e.preventDefault();try{parent.postMessage({__harbly:'key',key:k},'*')}catch(_){}}})})();</script>";
 
 fn resp(
     status: u16,

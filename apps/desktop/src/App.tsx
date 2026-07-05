@@ -193,6 +193,20 @@ export default function App() {
       // Plain-browser dev: no window handle
     }
 
+    // App shortcuts forwarded from inside the sandboxed preview iframe: it is
+    // cross-origin, so its keydowns never bubble to this window — the injected
+    // reporter script relays ⌘J/⌘K/⌘B via postMessage instead.
+    const onIframeKey = (e: MessageEvent) => {
+      const d = e.data as { __harbly?: string; key?: string } | null;
+      if (d?.__harbly !== "key") return;
+      const st = useStore.getState();
+      if (st.phase !== "main") return;
+      if (d.key === "j") st.toggleAi();
+      else if (d.key === "k") st.setPalette(true);
+      else if (d.key === "b") st.toggleSidebar();
+    };
+    window.addEventListener("message", onIframeKey);
+
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -216,6 +230,7 @@ export default function App() {
       alive = false;
       unsubs.forEach((u) => u());
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("message", onIframeKey);
     };
   }, []);
 
