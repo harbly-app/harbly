@@ -193,6 +193,9 @@ pub(crate) async fn run_claude_turn(
     cmd.arg("-p")
         .arg(&prompt)
         .args(["--output-format", "stream-json", "--verbose"])
+        // Token-level deltas: without this the CLI only emits whole assistant
+        // messages and the panel shows each reply popping in at once.
+        .arg("--include-partial-messages")
         .args(["--max-turns", "40"])
         .args(["--append-system-prompt", &system_prompt(task)]);
     cmd.arg("--mcp-config").arg(&config_path);
@@ -432,6 +435,9 @@ struct StreamParser {
     final_text: Option<String>,
     session_id: Option<String>,
     error: Option<String>,
+    /// Token deltas streamed since the last complete message — that message
+    /// repeats the same text and must not re-emit it.
+    streamed_partial: bool,
 }
 
 impl StreamParser {
@@ -442,6 +448,7 @@ impl StreamParser {
             final_text: None,
             session_id: None,
             error: None,
+            streamed_partial: false,
         }
     }
 
@@ -465,19 +472,48 @@ impl StreamParser {
         })
     }
 
+    /// Record text for the transcript fallback without emitting a Delta —
+    /// used when the same text already streamed as partial deltas.
+    fn record_text(&mut self, t: &str) {
+        if !t.trim().is_empty() {
+            self.texts.push(t.to_string());
+        }
+    }
+
     fn feed_claude(&mut self, v: &Value) -> Vec<AiEvent> {
         let mut out = vec![];
         if let Some(id) = v["session_id"].as_str() {
             self.session_id = Some(id.to_string());
         }
         match v["type"].as_str() {
+            // --include-partial-messages wraps the raw API stream: token
+            // deltas arrive here, ahead of the complete assistant message.
+            Some("stream_event") => {
+                let ev = &v["event"];
+                if ev["type"] == "content_block_delta" && ev["delta"]["type"] == "text_delta" {
+                    if let Some(t) = ev["delta"]["text"].as_str() {
+                        if !t.is_empty() {
+                            self.streamed_partial = true;
+                            out.push(AiEvent::Delta {
+                                text: t.to_string(),
+                            });
+                        }
+                    }
+                }
+            }
             Some("assistant") => {
+                // The complete message repeats text that already streamed as
+                // deltas — record it for the transcript, don't re-emit it
+                // (that would make the reply pop in twice).
+                let quiet = std::mem::take(&mut self.streamed_partial);
                 if let Some(blocks) = v["message"]["content"].as_array() {
                     for b in blocks {
                         match b["type"].as_str() {
                             Some("text") => {
-                                if let Some(ev) = b["text"].as_str().and_then(|t| self.push_text(t))
-                                {
+                                let text = b["text"].as_str().unwrap_or("");
+                                if quiet {
+                                    self.record_text(text);
+                                } else if let Some(ev) = self.push_text(text) {
                                     out.push(ev);
                                 }
                             }
@@ -532,9 +568,24 @@ impl StreamParser {
         let msg = &v["msg"];
         if let Some(t) = msg["type"].as_str() {
             match t {
+                "agent_message_delta" => {
+                    if let Some(d) = msg["delta"].as_str() {
+                        if !d.is_empty() {
+                            self.streamed_partial = true;
+                            out.push(AiEvent::Delta {
+                                text: d.to_string(),
+                            });
+                        }
+                    }
+                }
                 "agent_message" => {
-                    if let Some(ev) = msg["message"].as_str().and_then(|s| self.push_text(s)) {
-                        out.push(ev);
+                    let quiet = std::mem::take(&mut self.streamed_partial);
+                    if let Some(s) = msg["message"].as_str() {
+                        if quiet {
+                            self.record_text(s);
+                        } else if let Some(ev) = self.push_text(s) {
+                            out.push(ev);
+                        }
                     }
                 }
                 "exec_command_begin" => out.push(AiEvent::Action {
@@ -662,6 +713,41 @@ mod tests {
         let err = p.error.as_deref().unwrap();
         assert!(err.contains("error_during_execution"));
         assert!(err.contains("No conversation found"));
+    }
+
+    #[test]
+    fn claude_partial_deltas_stream_without_duplicate_on_complete_message() {
+        let mut p = StreamParser::new(AgentKind::ClaudeCode);
+        let d1 = p.feed(
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"你好"}}}"#,
+        );
+        assert!(matches!(&d1[0], AiEvent::Delta { text } if text == "你好"));
+        let d2 = p.feed(
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"，世界"}}}"#,
+        );
+        assert_eq!(d2.len(), 1);
+        // The complete message repeats the streamed text: record for the
+        // transcript fallback, but never re-emit (double pop-in)
+        let full = p.feed(
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"你好，世界"}]}}"#,
+        );
+        assert!(full.is_empty());
+        assert_eq!(p.texts, vec!["你好，世界".to_string()]);
+        // A message with no preceding partials (older CLI) still emits whole
+        let plain = p.feed(
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"第二条"}]}}"#,
+        );
+        assert_eq!(plain.len(), 1);
+    }
+
+    #[test]
+    fn codex_legacy_deltas_stream_without_duplicate() {
+        let mut p = StreamParser::new(AgentKind::Codex);
+        let d = p.feed(r#"{"id":"1","msg":{"type":"agent_message_delta","delta":"改好"}}"#);
+        assert!(matches!(&d[0], AiEvent::Delta { text } if text == "改好"));
+        let full = p.feed(r#"{"id":"1","msg":{"type":"agent_message","message":"改好了。"}}"#);
+        assert!(full.is_empty());
+        assert_eq!(p.texts, vec!["改好了。".to_string()]);
     }
 
     #[test]
