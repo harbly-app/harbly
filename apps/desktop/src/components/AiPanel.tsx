@@ -39,6 +39,9 @@ interface SupplyOption {
 
 interface LiveRun {
   job: string;
+  /** Which conversation this run belongs to — the panel can switch away
+   * mid-stream, and the deltas must not leak into another transcript. */
+  sessionId: string;
   instruction: string;
   actions: string[];
   text: string;
@@ -88,17 +91,21 @@ function buildOptions(
  * happens through the shared tool surface, so every write in a transcript is
  * a version somewhere. */
 export default function AiPanel() {
-  const t = makeT(useStore((s) => s.lang));
+  const lang = useStore((s) => s.lang);
+  const t = makeT(lang);
   const toggleAi = useStore((s) => s.toggleAi);
   const showToast = useStore((s) => s.showToast);
   const viewerAsset = useStore((s) => s.viewerAsset);
   const aiConfigEpoch = useStore((s) => s.aiConfigEpoch);
+  const root = useStore((s) => s.root);
+  // Sessions live in the library database — remember the selection per library
+  const sessionKey = `${LAST_SESSION_KEY}:${root ?? ""}`;
 
   const [options, setOptions] = useState<SupplyOption[] | null>(null);
   const [config, setConfig] = useState<AiConfig>({});
   const [sessions, setSessions] = useState<AiSession[]>([]);
   const [activeId, setActiveId] = useState<string | null>(() =>
-    localStorage.getItem(LAST_SESSION_KEY),
+    localStorage.getItem(sessionKey),
   );
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [draft, setDraft] = useState<Prefs>({
@@ -115,6 +122,18 @@ export default function AiPanel() {
   const [runs, setRuns] = useState<AiRun[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef<LiveRun | null>(null);
+  const activeIdRef = useRef(activeId);
+  // Monotonic ticket for message fetches — a slow response for a previously
+  // viewed session must not overwrite the transcript on screen
+  const msgEpoch = useRef(0);
+  // Closes the async gap in send() before `live` exists (draft creation):
+  // Enter auto-repeat there would create two sessions and two turns
+  const sendingRef = useRef(false);
+  // WKWebView delivers the composition-confirming Enter AFTER compositionend
+  // with isComposing already false — remember when composition last ended
+  const composeEndAt = useRef(0);
+  // Autoscroll only while the user is already at the bottom
+  const stickRef = useRef(true);
 
   const active = sessions.find((s) => s.id === activeId) ?? null;
   // Effective prefs: the active session's, or the draft's for a new one
@@ -147,17 +166,33 @@ export default function AiPanel() {
   }, []);
 
   const loadSessions = useCallback(() => {
+    const startedActive = activeIdRef.current;
     return api
       .aiSessionsList()
-      .then(setSessions)
+      .then((list) => {
+        setSessions(list);
+        // Reconcile a stale remembered id (deleted session, reset database):
+        // a phantom active id would fail every send with 会话不存在. Skip if
+        // the selection changed while fetching (a draft was just created).
+        setActiveId((cur) =>
+          cur && cur === startedActive && !list.some((s) => s.id === cur)
+            ? null
+            : cur,
+        );
+      })
       .catch(() => {});
   }, []);
 
   const loadMessages = useCallback((id: string | null) => {
+    const ticket = ++msgEpoch.current;
     const fetching: Promise<AiMessage[]> = id
       ? api.aiSessionMessages(id).catch((): AiMessage[] => [])
       : Promise.resolve([]);
-    void fetching.then(setMessages);
+    return fetching.then((msgs) => {
+      // Only the newest request may paint — invoke responses can reorder
+      // when sessions are switched quickly
+      if (msgEpoch.current === ticket) setMessages(msgs);
+    });
   }, []);
 
   // Versions + runs of the file being viewed: feeds the history popover and
@@ -180,13 +215,31 @@ export default function AiPanel() {
     void loadSupplies();
   }, [loadSupplies, aiConfigEpoch]);
 
+  // Mount AND library switch: fetch this library's sessions and re-seed the
+  // selection from its remembered key — keeping another library's list would
+  // offer ghost conversations that fail every send.
   useEffect(() => {
-    void loadSessions();
-  }, [loadSessions]);
+    const remembered = localStorage.getItem(sessionKey);
+    api
+      .aiSessionsList()
+      .then((list) => {
+        setSessions(list);
+        setActiveId(
+          remembered && list.some((s) => s.id === remembered)
+            ? remembered
+            : null,
+        );
+      })
+      .catch(() => {});
+  }, [sessionKey]);
 
   useEffect(() => {
-    loadMessages(activeId);
+    void loadMessages(activeId);
   }, [loadMessages, activeId]);
+
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
 
   useEffect(() => {
     loadAssetMeta();
@@ -194,25 +247,63 @@ export default function AiPanel() {
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && stickRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, live?.text, live?.actions.length]);
 
   useEffect(() => {
     liveRef.current = live;
   }, [live]);
 
+  // Closing the panel unmounts it: cancel a streaming turn instead of
+  // orphaning it — its reply could never be watched again, and a reopened
+  // panel would happily start a second concurrent turn on the same session.
+  useEffect(
+    () => () => {
+      const l = liveRef.current;
+      if (l) api.aiCancel(l.job).catch(() => {});
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (menu === "none") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu("none");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menu]);
+
   const switchSession = (id: string | null) => {
     setActiveId(id);
     setMenu("none");
-    if (id) localStorage.setItem(LAST_SESSION_KEY, id);
-    else localStorage.removeItem(LAST_SESSION_KEY);
+    if (id) localStorage.setItem(sessionKey, id);
+    else localStorage.removeItem(sessionKey);
+  };
+
+  const restoreSession = async () => {
+    try {
+      const id = await api.aiSessionRestore();
+      await loadSessions();
+      if (id) switchSession(id);
+    } catch (e) {
+      showToast(String(e));
+    }
   };
 
   const deleteSession = async (id: string) => {
+    // Deleting the conversation that is streaming: stop its run first
+    const l = liveRef.current;
+    if (l?.sessionId === id) api.aiCancel(l.job).catch(() => {});
     try {
       await api.aiSessionDelete(id);
-      if (id === activeId) switchSession(null);
+      if (id === activeIdRef.current) switchSession(null);
       await loadSessions();
+      // Undo over confirm — the same contract as file deletion
+      showToast({
+        text: t("aiSessionDeleted"),
+        action: { label: t("undoAction"), fn: () => void restoreSession() },
+      });
     } catch (e) {
       showToast(String(e));
     }
@@ -248,68 +339,87 @@ export default function AiPanel() {
     }
   };
 
+  // The turn may finish while another session is on screen — refresh only
+  // the transcript actually being shown
+  const refreshAfterTurn = (sessionId: string) =>
+    activeIdRef.current === sessionId
+      ? loadMessages(sessionId)
+      : Promise.resolve();
+
   const send = async () => {
     const text = input.trim();
-    if (live || !text || !prefs.supply) return;
-    let sessionId = activeId;
+    if (sendingRef.current || live || !text || !prefs.supply) return;
+    // No default tier: a session always pins an explicit model — the custom
+    // chip with an empty input must not create a model-less session
+    if (!prefs.model.trim()) return;
+    sendingRef.current = true;
     try {
-      if (!sessionId) {
-        const s = await api.aiSessionCreate(
-          prefs.supply,
-          prefs.model,
-          prefs.effort,
-        );
-        setSessions((list) => [s, ...list]);
-        sessionId = s.id;
-        switchSession(s.id);
+      let sessionId = activeId;
+      try {
+        if (!sessionId) {
+          const s = await api.aiSessionCreate(
+            prefs.supply,
+            prefs.model,
+            prefs.effort,
+          );
+          setSessions((list) => [s, ...list]);
+          sessionId = s.id;
+          switchSession(s.id);
+        }
+      } catch (e) {
+        showToast(String(e));
+        return;
       }
-    } catch (e) {
-      showToast(String(e));
-      return;
-    }
-    const job = crypto.randomUUID();
-    setInput("");
-    // Optimistic user turn; replaced by the authoritative list after the turn
-    setMessages((m) => [
-      ...m,
-      {
-        id: `local-${job}`,
-        sessionId,
-        role: "user",
-        content: text,
-        actions: [],
-        createdAt: Math.floor(Date.now() / 1000),
-      },
-    ]);
-    setLive({ job, instruction: text, actions: [], text: "" });
-    try {
-      await api.aiSend(
+      const job = crypto.randomUUID();
+      setInput("");
+      // Optimistic user turn; replaced by the authoritative list after the turn
+      setMessages((m) => [
+        ...m,
         {
-          job,
+          id: `local-${job}`,
           sessionId,
-          text,
-          currentAssetId: viewerAsset?.id ?? null,
+          role: "user",
+          content: text,
+          actions: [],
+          createdAt: Math.floor(Date.now() / 1000),
         },
-        (e) => {
-          setLive((l) => {
-            if (l?.job !== job) return l;
-            if (e.type === "delta") return { ...l, text: l.text + e.text };
-            const last = l.actions[l.actions.length - 1];
-            return last === e.label
-              ? l
-              : { ...l, actions: [...l.actions, e.label] };
-          });
-        },
-      );
-      loadMessages(sessionId);
-      loadAssetMeta();
-      void loadSessions();
-    } catch (e) {
-      showToast(localizeAiError(String(e)));
-      setInput(text);
-      loadMessages(sessionId);
+      ]);
+      stickRef.current = true;
+      setLive({ job, sessionId, instruction: text, actions: [], text: "" });
+      try {
+        await api.aiSend(
+          {
+            job,
+            sessionId,
+            text,
+            currentAssetId: viewerAsset?.id ?? null,
+          },
+          (e) => {
+            setLive((l) => {
+              if (l?.job !== job) return l;
+              if (e.type === "delta") return { ...l, text: l.text + e.text };
+              const last = l.actions[l.actions.length - 1];
+              return last === e.label
+                ? l
+                : { ...l, actions: [...l.actions, e.label] };
+            });
+          },
+        );
+        // Fetch BEFORE the finally clears the live block: both updates land
+        // in one React batch, so the streamed reply never blinks out
+        await refreshAfterTurn(sessionId);
+        loadAssetMeta();
+        void loadSessions();
+      } catch (e) {
+        showToast(localizeAiError(String(e)));
+        // Restore the instruction only into the composer it came from
+        if (activeIdRef.current === sessionId) setInput(text);
+        await refreshAfterTurn(sessionId);
+      } finally {
+        setLive((l) => (l?.job === job ? null : l));
+      }
     } finally {
-      setLive((l) => (l?.job === job ? null : l));
+      sendingRef.current = false;
     }
   };
 
@@ -407,7 +517,7 @@ export default function AiPanel() {
 
       {menu !== "none" && (
         <button
-          aria-label="close menu"
+          aria-label={t("aiCloseMenu")}
           onClick={() => setMenu("none")}
           className="fixed inset-0 z-10 cursor-default"
           tabIndex={-1}
@@ -416,6 +526,7 @@ export default function AiPanel() {
       {menu === "sessions" && (
         <SessionMenu
           t={t}
+          lang={lang}
           sessions={sessions}
           activeId={activeId}
           onPick={switchSession}
@@ -433,6 +544,7 @@ export default function AiPanel() {
       {menu === "versions" && (
         <VersionsMenu
           t={t}
+          lang={lang}
           versions={versions}
           runs={runs}
           latestVer={latestVer}
@@ -444,7 +556,17 @@ export default function AiPanel() {
       {empty ? (
         <EmptyState t={t} />
       ) : (
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-3">
+        <div
+          ref={scrollRef}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            // Re-stick when the user returns to the bottom; let them read
+            // upward without the stream yanking the scroll back down
+            stickRef.current =
+              el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+          }}
+          className="min-h-0 flex-1 overflow-y-auto p-3"
+        >
           <div className="flex flex-col gap-2.5">
             {messages.map((m) => (
               <MessageRow
@@ -457,7 +579,7 @@ export default function AiPanel() {
                 onRollback={(v) => void rollback(v)}
               />
             ))}
-            {live && <LiveBlock live={live} t={t} />}
+            {live?.sessionId === activeId && <LiveBlock live={live} t={t} />}
           </div>
         </div>
       )}
@@ -473,15 +595,19 @@ export default function AiPanel() {
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onCompositionEnd={() => {
+              composeEndAt.current = Date.now();
+            }}
             onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                !e.shiftKey &&
-                !e.nativeEvent.isComposing
-              ) {
-                e.preventDefault();
-                void send();
-              }
+              if (e.key !== "Enter" || e.shiftKey) return;
+              // Mid-composition Enter (all engines)…
+              if (e.nativeEvent.isComposing) return;
+              // …and WKWebView's candidate-confirming Enter, which arrives
+              // AFTER compositionend with isComposing already false — a bare
+              // isComposing check would send half-typed pinyin
+              if (Date.now() - composeEndAt.current < 100) return;
+              e.preventDefault();
+              void send();
             }}
             rows={2}
             disabled={!!live || empty}
@@ -503,7 +629,9 @@ export default function AiPanel() {
           ) : (
             <button
               onClick={() => void send()}
-              disabled={empty || !prefs.supply || !input.trim()}
+              disabled={
+                empty || !prefs.supply || !prefs.model.trim() || !input.trim()
+              }
               title={t("aiSend")}
               className="grid h-8 w-8 shrink-0 place-items-center rounded-ctl bg-primary text-white transition hover:bg-primary-light disabled:opacity-35"
             >
@@ -526,12 +654,14 @@ function MenuShell({ children }: { children: React.ReactNode }) {
 
 function SessionMenu({
   t,
+  lang,
   sessions,
   activeId,
   onPick,
   onDelete,
 }: {
   t: TFn;
+  lang: string;
   sessions: AiSession[];
   activeId: string | null;
   onPick: (id: string | null) => void;
@@ -561,7 +691,7 @@ function SessionMenu({
               {s.title || t("aiNewSession")}
             </div>
             <div className="text-[10px] text-sub">
-              {supplyLabel(s.supply)} · {timeAgo(s.updatedAt)}
+              {supplyLabel(s.supply)} · {timeAgo(s.updatedAt, lang)}
             </div>
           </button>
           {s.id === activeId && (
@@ -622,14 +752,15 @@ const MODEL_CHOICES: Record<AiSupply, { v: string; label: string }[]> = {
 /** The effort levels each supply ACTUALLY accepts (verified 2026-07-04):
  * claude --effort and Anthropic output_config take low…max; codex
  * model_reasoning_effort takes minimal…xhigh; OpenAI reasoning_effort takes
- * none…xhigh; OpenRouter's reasoning.effort accepts the full spectrum and
- * normalizes per upstream. First entry = initial pick (claude's documented
- * session default is high; elsewhere medium). */
+ * the full none/minimal/low/medium/high/xhigh spectrum; OpenRouter's
+ * reasoning.effort accepts everything and normalizes per upstream. First
+ * entry = initial pick (claude's documented session default is high;
+ * elsewhere medium). */
 const EFFORT_CHOICES: Record<AiSupply, AiEffort[]> = {
   claude: ["high", "low", "medium", "xhigh", "max"],
   codex: ["medium", "minimal", "low", "high", "xhigh"],
   anthropic: ["medium", "low", "high", "xhigh", "max"],
-  openai: ["medium", "none", "low", "high", "xhigh"],
+  openai: ["medium", "none", "minimal", "low", "high", "xhigh"],
   openrouter: ["medium", "none", "minimal", "low", "high", "xhigh", "max"],
 };
 
@@ -751,7 +882,7 @@ function PrefsMenu({
         </div>
       )}
       <div className="px-2.5 pt-1 pb-1 text-[10.5px] font-bold text-sub">
-        Effort
+        {t("aiEffortLabel")}
       </div>
       <div className="flex flex-wrap gap-1 px-2.5 pb-2">
         {efforts.map((e) =>
@@ -766,6 +897,7 @@ function PrefsMenu({
 
 function VersionsMenu({
   t,
+  lang,
   versions,
   runs,
   latestVer,
@@ -773,6 +905,7 @@ function VersionsMenu({
   onRollback,
 }: {
   t: TFn;
+  lang: string;
   versions: VersionInfo[];
   runs: AiRun[];
   latestVer: number;
@@ -800,7 +933,7 @@ function VersionsMenu({
             {instructionOf(v.ver) || localizeVerLabel(v.label, t)}
           </span>
           <span className="shrink-0 text-[10px] text-sub">
-            {timeAgo(v.createdAt)}
+            {timeAgo(v.createdAt, lang)}
           </span>
           <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
             {v.ver > 1 && (

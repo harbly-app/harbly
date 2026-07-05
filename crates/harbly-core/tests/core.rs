@@ -581,10 +581,19 @@ fn ai_sessions_and_messages_roundtrip() {
         None
     );
 
-    // Delete: transcript gone, run back-links nulled, session list shrinks
-    lib.delete_ai_session(&s.id).unwrap();
+    // Delete hands back a snapshot; restore resurrects transcript + title
+    let snap = lib.delete_ai_session(&s.id).unwrap().unwrap();
     assert!(lib.get_ai_session(&s.id).unwrap().is_none());
     assert!(lib.list_ai_messages(&s.id).unwrap().is_empty());
+    assert_eq!(snap.messages.len(), 2);
+    lib.restore_ai_session(&snap).unwrap();
+    let back = lib.get_ai_session(&s.id).unwrap().unwrap();
+    assert!(back.title.starts_with("帮我完善"));
+    let msgs = lib.list_ai_messages(&s.id).unwrap();
+    assert_eq!(msgs.len(), 2);
+    assert_eq!(msgs[1].actions, vec!["read_asset a.html".to_string()]);
+    // Deleting a nonexistent session is a no-op, not an error
+    assert!(lib.delete_ai_session("ghost").unwrap().is_none());
 }
 
 #[test]
@@ -725,5 +734,24 @@ fn ai_tools_list_and_delete() {
     // Folder traversal rejected on list too
     assert!(lib
         .execute_ai_tool("list_assets", &serde_json::json!({"folder": "../x"}), &ctx)
+        .is_err());
+
+    // Absolute folders must not escape the library (Path::join swaps the root)
+    let outside = std::env::temp_dir().join("harbly-escape-test");
+    let _ = fs::remove_dir_all(&outside);
+    assert!(lib
+        .execute_ai_tool(
+            "create_asset",
+            &serde_json::json!({
+                "folder": outside.to_string_lossy(),
+                "name": "evil",
+                "content": "<html>x</html>",
+            }),
+            &ctx,
+        )
+        .is_err());
+    assert!(!outside.exists());
+    assert!(lib
+        .execute_ai_tool("list_assets", &serde_json::json!({"folder": "/etc"}), &ctx)
         .is_err());
 }

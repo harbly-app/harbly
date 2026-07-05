@@ -78,6 +78,7 @@ pub fn run() {
             ai::ai_sessions_list,
             ai::ai_session_create,
             ai::ai_session_delete,
+            ai::ai_session_restore,
             ai::ai_session_set_prefs,
             ai::ai_session_messages,
             ai::ai_send,

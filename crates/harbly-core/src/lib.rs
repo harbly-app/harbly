@@ -10,7 +10,8 @@ mod types;
 mod watch;
 
 pub use ai_meta::{
-    AiMessage, AiRunRecord, AiSession, AiToolCtx, AiWriteOutcome, NewAiRun, AI_VERSION_LABEL,
+    AiMessage, AiRunRecord, AiSession, AiSessionSnapshot, AiToolCtx, AiWriteOutcome, NewAiRun,
+    AI_VERSION_LABEL,
 };
 pub use error::{HarblyError, Result};
 pub use markdown::md_to_html_body;
@@ -93,9 +94,11 @@ impl Library {
             .unwrap_or_else(|| "html".to_string())
     }
 
-    /// Relative path → absolute path. Rejects path traversal.
+    /// Relative path → absolute path. Rejects traversal AND absolute inputs:
+    /// `Path::join` DISCARDS the base when handed an absolute path, so an
+    /// absolute `rel` (e.g. model-supplied) would silently escape the root.
     pub fn abs(&self, rel: &str) -> PathBuf {
-        if rel.split('/').any(|c| c == "..") {
+        if Path::new(rel).is_absolute() || rel.split('/').any(|c| c == "..") {
             return self.root.join("__invalid__");
         }
         self.root.join(rel)

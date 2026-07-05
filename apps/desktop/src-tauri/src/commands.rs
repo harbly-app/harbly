@@ -151,6 +151,24 @@ pub fn enqueue_missing_thumbs(app: &AppHandle) {
     }
 }
 
+/// Queue a thumbnail for ONE asset — AI writes refresh just the touched file;
+/// a full missing-scan per write would stat the entire library on every
+/// tool call of a multi-write turn.
+pub fn enqueue_thumb_for(app: &AppHandle, id: &str) {
+    let state = app.state::<AppState>();
+    let Ok(lib) = state.lib() else { return };
+    let Ok(a) = lib.asset(id) else { return };
+    let tx = state.thumb_tx.lock().unwrap();
+    let Some(tx) = tx.as_ref() else { return };
+    if !lib.thumb_path(&a.current_hash).exists() {
+        let _ = tx.send(ThumbJob {
+            url: format!("harbly-asset://localhost/current/{}", a.id),
+            asset_id: a.id,
+            hash: a.current_hash,
+        });
+    }
+}
+
 // ---------- Commands ----------
 
 #[derive(Serialize)]

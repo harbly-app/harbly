@@ -315,6 +315,14 @@ impl Library {
         hash: &str,
         label: &str,
     ) -> Result<i64> {
+        let ext = self.asset_ext(asset_id);
+        let dir = self.versions_dir().join(asset_id);
+        std::fs::create_dir_all(&dir)?;
+        // Dedup check + number allocation happen in ONE statement under the
+        // database's write serialization: concurrent writers (a second AI
+        // turn in-process, or the harbly-mcp process) can never both claim
+        // the same slot — the old read-then-insert split could fail its
+        // INSERT after the file was already on disk.
         let next = {
             let db = self.db.lock().unwrap();
             let last: Option<(i64, String)> = db
@@ -324,21 +332,30 @@ impl Library {
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .optional()?;
-            match last {
-                Some((ver, h)) if h == hash => return Ok(ver),
-                Some((ver, _)) => ver + 1,
-                None => 1,
+            if let Some((ver, h)) = last {
+                if h == hash {
+                    return Ok(ver);
+                }
             }
+            db.query_row(
+                "INSERT INTO versions(asset_id, ver, hash, label, size_bytes, created_at)
+                 SELECT ?1, COALESCE(MAX(ver),0)+1, ?2, ?3, ?4, ?5 FROM versions WHERE asset_id=?1
+                 RETURNING ver",
+                params![asset_id, hash, label, content.len() as i64, now()],
+                |r| r.get(0),
+            )?
         };
-        let ext = self.asset_ext(asset_id);
-        let dir = self.versions_dir().join(asset_id);
-        std::fs::create_dir_all(&dir)?;
-        std::fs::write(dir.join(format!("v{next}.{ext}")), content)?;
-        let db = self.db.lock().unwrap();
-        db.execute(
-            "INSERT INTO versions(asset_id, ver, hash, label, size_bytes, created_at) VALUES(?1,?2,?3,?4,?5,?6)",
-            params![asset_id, next, hash, label, content.len() as i64, now()],
-        )?;
+        // Snapshot file after the row is reserved (distinct numbers → distinct
+        // files, no clobbering); roll the row back if the disk write fails so
+        // no phantom version remains.
+        if let Err(e) = std::fs::write(dir.join(format!("v{next}.{ext}")), content) {
+            let db = self.db.lock().unwrap();
+            let _ = db.execute(
+                "DELETE FROM versions WHERE asset_id=?1 AND ver=?2",
+                params![asset_id, next],
+            );
+            return Err(e.into());
+        }
         Ok(next)
     }
 

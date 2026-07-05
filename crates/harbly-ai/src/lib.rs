@@ -58,8 +58,8 @@ pub struct SessionTask {
     pub current_asset: Option<AssetRef>,
     /// BCP-47 UI language; replies come back in it.
     pub reply_lang: String,
-    /// "" (default) | "low" | "medium" | "high" — mapped per provider
-    /// (Anthropic thinking budget, OpenAI reasoning_effort, codex config).
+    /// "" (no knob) or a provider effort token — Anthropic/claude CLI accept
+    /// low|medium|high|xhigh|max, OpenAI/codex none|minimal|low|medium|high|xhigh.
     pub effort: String,
 }
 
@@ -166,6 +166,9 @@ pub enum AiError {
     Http(String),
     #[error("provider: {0}")]
     Provider(String),
+    /// The per-turn tool budget ran out before the model produced any reply.
+    #[error("step limit")]
+    StepLimit,
     #[error("agent: {0}")]
     Agent(String),
     #[error("io: {0}")]

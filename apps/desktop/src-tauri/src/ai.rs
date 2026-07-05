@@ -10,7 +10,7 @@
 //! versions either way; a failed turn returns Err and leaves no assistant
 //! message (the user message stays, ready to retry).
 
-use crate::commands::{cur_lang, enqueue_missing_thumbs};
+use crate::commands::cur_lang;
 use crate::state::AppState;
 use harbly_ai::{
     AgentInfo, AgentKind, AiError, AssetRef, ByokProvider, CancelFlag, ChatTurn, Role, SessionTask,
@@ -123,12 +123,33 @@ pub async fn ai_session_create(
         .map_err(|e| e.to_string())
 }
 
+/// Delete a conversation, keeping its snapshot for the undo toast — sessions
+/// follow the product's undo-over-confirm rule like file deletion does.
 #[tauri::command]
 pub async fn ai_session_delete(app: AppHandle, id: String) -> Result<(), String> {
-    app.state::<AppState>()
+    let state = app.state::<AppState>();
+    let snap = state
         .lib()?
         .delete_ai_session(&id)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if snap.is_some() {
+        *state.ai_deleted_session.lock().unwrap() = snap;
+    }
+    Ok(())
+}
+
+/// Undo the most recent session deletion. Returns the restored session id so
+/// the panel can re-select it (None when there is nothing to restore).
+#[tauri::command]
+pub async fn ai_session_restore(app: AppHandle) -> Result<Option<String>, String> {
+    let state = app.state::<AppState>();
+    let snap = state.ai_deleted_session.lock().unwrap().take();
+    let Some(snap) = snap else { return Ok(None) };
+    state
+        .lib()?
+        .restore_ai_session(&snap)
+        .map_err(|e| e.to_string())?;
+    Ok(Some(snap.session.id))
 }
 
 #[tauri::command]
@@ -188,6 +209,7 @@ fn err_message(e: &AiError) -> String {
     match e {
         AiError::Cancelled => "已取消".to_string(),
         AiError::Timeout => "AI 请求超时".to_string(),
+        AiError::StepLimit => "已达到单回合步数上限".to_string(),
         AiError::Http(d) => format!("网络错误: {d}"),
         AiError::Provider(d) => format!("AI 服务错误: {d}"),
         AiError::Agent(d) => format!("本地 agent 出错: {d}"),
@@ -195,16 +217,25 @@ fn err_message(e: &AiError) -> String {
     }
 }
 
-/// Removes the job's cancel flag even on early returns/panics.
+/// The claude CLI's "resume id no longer exists" failure — the only agent
+/// error worth an automatic fresh-run retry.
+fn is_stale_resume(result: &Result<harbly_ai::TurnOutput, AiError>) -> bool {
+    matches!(result, Err(AiError::Agent(m)) if m.to_ascii_lowercase().contains("no conversation found"))
+}
+
+/// Removes the job's cancel flag and the session's busy mark even on early
+/// returns/panics.
 struct JobGuard {
     app: AppHandle,
     job: String,
+    session_id: String,
 }
 
 impl Drop for JobGuard {
     fn drop(&mut self) {
         let state = self.app.state::<AppState>();
         state.ai_jobs.lock().unwrap().remove(&self.job);
+        state.ai_busy.lock().unwrap().remove(&self.session_id);
     }
 }
 
@@ -221,9 +252,14 @@ struct AppExecutor {
 impl ToolExecutor for AppExecutor {
     fn execute(&self, name: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
         let (value, outcome) = self.lib.execute_ai_tool(name, args, &self.ctx)?;
-        if outcome.is_some() {
+        if let Some(o) = outcome {
             *self.wrote.lock().unwrap() = true;
-            enqueue_missing_thumbs(&self.app);
+            // Just the touched asset — a full missing-thumb scan per write
+            // would stat the whole library on every call of a multi-write
+            // turn. Deletions (ver 0) need no thumbnail.
+            if o.ver > 0 {
+                crate::commands::enqueue_thumb_for(&self.app, &o.asset_id);
+            }
             let _ = self.app.emit("library-changed", ());
         }
         Ok(value)
@@ -308,6 +344,29 @@ pub async fn ai_send(
         .get_ai_session(&session_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "会话不存在".to_string())?;
+
+    // Backend single-flight per session: two interleaved turns would corrupt
+    // one transcript and cross-link run rows. The cancel flag registers in
+    // the same breath so Stop already works while the supply resolves.
+    let cancel = CancelFlag::new();
+    {
+        let state = app.state::<AppState>();
+        let mut busy = state.ai_busy.lock().unwrap();
+        if !busy.insert(session_id.clone()) {
+            return Err("该会话已有正在进行的回合".to_string());
+        }
+        state
+            .ai_jobs
+            .lock()
+            .unwrap()
+            .insert(job.clone(), cancel.clone());
+    }
+    let _guard = JobGuard {
+        app: app.clone(),
+        job,
+        session_id: session_id.clone(),
+    };
+
     let supply = resolve_supply(&lib, &session).await?;
 
     // Context BEFORE this turn's user message lands in the transcript
@@ -352,20 +411,6 @@ pub async fn ai_send(
         effort: session.effort.clone(),
     };
 
-    let cancel = CancelFlag::new();
-    {
-        let state = app.state::<AppState>();
-        state
-            .ai_jobs
-            .lock()
-            .unwrap()
-            .insert(job.clone(), cancel.clone());
-    }
-    let _guard = JobGuard {
-        app: app.clone(),
-        job,
-    };
-
     let executor = AppExecutor {
         app: app.clone(),
         lib: lib.clone(),
@@ -389,7 +434,16 @@ pub async fn ai_send(
     };
 
     let resume = session.agent_session_id.as_deref();
-    let result = harbly_ai::run_turn(&task, &supply, &executor, resume, cancel, &mut sink).await;
+    let mut result =
+        harbly_ai::run_turn(&task, &supply, &executor, resume, cancel.clone(), &mut sink).await;
+    // The claude CLI garbage-collects old sessions; a dead resume id would
+    // otherwise brick this conversation on every send. Drop the id and rerun
+    // fresh once — without a resume id the engine replays the transcript.
+    if resume.is_some() && is_stale_resume(&result) {
+        let _ = lib.clear_ai_session_agent_id(&session_id);
+        result =
+            harbly_ai::run_turn(&task, &supply, &executor, None, cancel.clone(), &mut sink).await;
+    }
 
     match result {
         Ok(out) => {

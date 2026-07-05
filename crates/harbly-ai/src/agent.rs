@@ -199,10 +199,12 @@ pub(crate) async fn run_claude_turn(
         cmd.args(["--allowedTools", "mcp__harbly,mcp__harbly__*"]);
         // ...and explicitly forbid raw file/exec access: the user's own
         // global Claude Code permission rules would otherwise leak into this
-        // headless run (observed: Bash find escaping the library).
+        // headless run (observed: Bash find escaping the library). Web and
+        // subagent tools are closed too — a library-only run has no business
+        // browsing, and Task would launder the other bans through a subagent.
         cmd.args([
             "--disallowedTools",
-            "Bash,Read,Edit,Write,MultiEdit,NotebookEdit,Glob,Grep",
+            "Bash,Read,Edit,Write,MultiEdit,NotebookEdit,Glob,Grep,WebFetch,WebSearch,Task",
         ]);
     }
     if let Some(id) = resume {
@@ -283,7 +285,7 @@ pub(crate) async fn run_codex_turn(
     cmd.arg(&prompt).current_dir(scratch.path());
 
     let parsed = run_agent_process(cmd, AgentKind::Codex, cancel, on_event).await?;
-    let mut reply = parsed
+    let reply = parsed
         .final_text
         .clone()
         .unwrap_or_else(|| parsed.assistant_text());
@@ -306,7 +308,10 @@ pub(crate) async fn run_codex_turn(
         }
     }
     if reply.trim().is_empty() {
-        reply = task.instruction.clone();
+        // Surface silence as a failure — echoing the user's instruction back
+        // as a fake assistant reply would mask the agent dying quietly. Any
+        // write-back above already landed as a version, so nothing is lost.
+        return Err(AiError::Agent("empty reply".into()));
     }
     Ok(TurnOutput {
         reply,
@@ -351,7 +356,11 @@ async fn run_agent_process(
         tokio::spawn(async move {
             let mut buf = String::new();
             let _ = se.read_to_string(&mut buf).await;
-            let start = buf.len().saturating_sub(2000);
+            let mut start = buf.len().saturating_sub(2000);
+            // Byte offset may land inside a multi-byte char (CJK stderr)
+            while !buf.is_char_boundary(start) {
+                start += 1;
+            }
             *tail.lock().unwrap() = buf[start..].to_string();
         });
     }

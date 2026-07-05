@@ -20,6 +20,8 @@ const TURN_TIMEOUT: Duration = Duration::from_secs(600);
 /// Streams stall rather than fail when a proxy dies; give up after this long
 /// without a single byte.
 const CHUNK_TIMEOUT: Duration = Duration::from_secs(60);
+/// How often the cancel flag is polled while awaiting the network.
+const CANCEL_TICK: Duration = Duration::from_millis(250);
 /// Tool round-trips per turn — a loop guard, not a feature budget.
 const MAX_STEPS: usize = 12;
 const ANTHROPIC_MAX_TOKENS: u32 = 32_768;
@@ -42,12 +44,26 @@ pub(crate) async fn run_turn(
     let deadline = Instant::now() + TURN_TIMEOUT;
 
     let mut reply = String::new();
+    // stop_reason/finish_reason of the last step — turns a blank turn into an
+    // actionable error (truncation vs refusal) instead of "empty response".
+    let mut last_stop: Option<String> = None;
+    // The model still wanted tools when the step budget ran out. Its pending
+    // calls were NOT executed: performing writes whose results can never be
+    // reported back would leave silent side effects.
+    let mut steps_exhausted = false;
+
     match provider {
         ByokProvider::Anthropic => {
             let mut messages = anthropic_history(task);
-            for _ in 0..MAX_STEPS {
-                let body = anthropic_body(task, model, &messages);
-                let asm = stream_step(
+            // Effort knobs vary by model generation and the id heuristic can
+            // misread custom models; a shape 400 on the FIRST request (nothing
+            // streamed, no replay in flight) walks the fallback chain.
+            let mut shapes = shape_fallbacks(detect_shape(model, &task.effort)).into_iter();
+            let mut shape = shapes.next().unwrap_or(EffortShape::Bare);
+            let mut step = 0;
+            while step < MAX_STEPS {
+                let body = anthropic_body(task, model, &messages, shape);
+                let asm = match stream_step(
                     &client,
                     provider,
                     api_key,
@@ -57,8 +73,23 @@ pub(crate) async fn run_turn(
                     on_event,
                     StepAsm::new_anthropic(),
                 )
-                .await?;
+                .await
+                {
+                    Ok(a) => a,
+                    Err(AiError::Provider(msg)) if step == 0 && is_effort_shape_error(&msg) => {
+                        match shapes.next() {
+                            Some(next) => {
+                                shape = next;
+                                continue;
+                            }
+                            None => return Err(AiError::Provider(msg)),
+                        }
+                    }
+                    Err(e) => return Err(e),
+                };
+                step += 1;
                 let (blocks, stop_reason, text) = asm.into_anthropic();
+                last_stop = stop_reason.clone();
                 if !text.is_empty() {
                     reply = text;
                 }
@@ -70,9 +101,24 @@ pub(crate) async fn run_turn(
                 if stop_reason.as_deref() != Some("tool_use") || tool_uses.is_empty() {
                     break;
                 }
-                messages.push(json!({ "role": "assistant", "content": blocks }));
+                if step == MAX_STEPS {
+                    steps_exhausted = true;
+                    break;
+                }
+                // The API rejects empty text blocks on replay (a text block
+                // can open and close with zero deltas ahead of tool_use).
+                let replay: Vec<Value> = blocks
+                    .into_iter()
+                    .filter(|b| {
+                        !(b["type"] == "text" && b["text"].as_str().unwrap_or("").is_empty())
+                    })
+                    .collect();
+                messages.push(json!({ "role": "assistant", "content": replay }));
                 let mut results = Vec::new();
                 for tu in &tool_uses {
+                    if cancel.is_cancelled() {
+                        return Err(AiError::Cancelled);
+                    }
                     let name = tu["name"].as_str().unwrap_or_default();
                     let args = &tu["input"];
                     on_event(AiEvent::Action {
@@ -94,7 +140,8 @@ pub(crate) async fn run_turn(
         }
         ByokProvider::OpenAi | ByokProvider::OpenRouter => {
             let mut messages = openai_history(task);
-            for _ in 0..MAX_STEPS {
+            let mut step = 0;
+            while step < MAX_STEPS {
                 let body = openai_body(task, provider, model, &messages);
                 let asm = stream_step(
                     &client,
@@ -107,11 +154,17 @@ pub(crate) async fn run_turn(
                     StepAsm::new_openai(),
                 )
                 .await?;
-                let (text, calls, finish) = asm.into_openai();
+                step += 1;
+                let (text, calls, finish, reasoning) = asm.into_openai();
+                last_stop = finish.clone();
                 if !text.is_empty() {
                     reply = text.clone();
                 }
                 if finish.as_deref() != Some("tool_calls") || calls.is_empty() {
+                    break;
+                }
+                if step == MAX_STEPS {
+                    steps_exhausted = true;
                     break;
                 }
                 let tool_calls: Vec<Value> = calls
@@ -124,12 +177,22 @@ pub(crate) async fn run_turn(
                         })
                     })
                     .collect();
-                messages.push(json!({
+                let mut assistant = json!({
                     "role": "assistant",
                     "content": if text.is_empty() { Value::Null } else { Value::String(text) },
                     "tool_calls": tool_calls,
-                }));
+                });
+                // OpenRouter requires reasoning_details to be echoed back
+                // verbatim on tool round-trips — Anthropic/Gemini upstreams
+                // reject the follow-up without their reasoning blocks.
+                if provider == ByokProvider::OpenRouter && !reasoning.is_empty() {
+                    assistant["reasoning_details"] = Value::Array(reasoning);
+                }
+                messages.push(assistant);
                 for c in &calls {
+                    if cancel.is_cancelled() {
+                        return Err(AiError::Cancelled);
+                    }
                     let args: Value =
                         serde_json::from_str(&c.arguments).unwrap_or_else(|_| json!({}));
                     on_event(AiEvent::Action {
@@ -149,13 +212,121 @@ pub(crate) async fn run_turn(
         }
     }
 
+    if steps_exhausted {
+        if reply.trim().is_empty() {
+            return Err(AiError::StepLimit);
+        }
+        let note = step_limit_note(&task.reply_lang);
+        on_event(AiEvent::Delta { text: note.clone() });
+        reply.push_str(&note);
+    }
     if reply.trim().is_empty() {
-        return Err(AiError::Provider("empty response".into()));
+        return Err(empty_reply_error(last_stop.as_deref()));
     }
     Ok(TurnOutput {
         reply,
         agent_session_id: None,
     })
+}
+
+// ---------- Anthropic effort shapes ----------
+
+/// Effort knobs by model generation (verified 2026-07 against the
+/// extended-thinking docs):
+/// - Sonnet 5 / Opus 4.8+: adaptive thinking + output_config effort;
+/// - Fable/Mythos 5: thinking is always-on — the field must be OMITTED
+///   (sending enabled OR disabled is a 400), effort goes via output_config;
+/// - Haiku 4.5 / Claude ≤4.5 era: legacy thinking {enabled, budget_tokens}.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EffortShape {
+    Adaptive,
+    OutputOnly,
+    Legacy,
+    Bare,
+}
+
+fn detect_shape(model: &str, effort: &str) -> EffortShape {
+    if !crate::is_anthropic_effort(effort) {
+        return EffortShape::Bare;
+    }
+    if model.contains("fable") || model.contains("mythos") {
+        return EffortShape::OutputOnly;
+    }
+    if model.contains("haiku") || model.contains("-4-5") || model.contains("claude-3") {
+        return EffortShape::Legacy;
+    }
+    EffortShape::Adaptive
+}
+
+/// Shapes to try in order: the detected one, the plausible alternate, then no
+/// knobs at all. Custom model ids the heuristic misreads (claude-opus-4-1
+/// matches no legacy marker but only speaks the legacy shape) still get a
+/// working turn instead of a hard 400.
+fn shape_fallbacks(first: EffortShape) -> Vec<EffortShape> {
+    match first {
+        EffortShape::Adaptive => vec![
+            EffortShape::Adaptive,
+            EffortShape::Legacy,
+            EffortShape::Bare,
+        ],
+        EffortShape::Legacy => vec![
+            EffortShape::Legacy,
+            EffortShape::Adaptive,
+            EffortShape::Bare,
+        ],
+        EffortShape::OutputOnly => vec![
+            EffortShape::OutputOnly,
+            EffortShape::Adaptive,
+            EffortShape::Bare,
+        ],
+        EffortShape::Bare => vec![EffortShape::Bare],
+    }
+}
+
+/// A 400 whose message names the effort/thinking knobs. Anything else (auth,
+/// overload, content) must NOT trigger a re-send.
+fn is_effort_shape_error(msg: &str) -> bool {
+    let lower = msg.to_ascii_lowercase();
+    lower.starts_with("http 400")
+        && [
+            "thinking",
+            "output_config",
+            "budget_tokens",
+            "adaptive",
+            "effort",
+        ]
+        .iter()
+        .any(|k| lower.contains(k))
+}
+
+fn empty_reply_error(stop: Option<&str>) -> AiError {
+    AiError::Provider(match stop {
+        Some("max_tokens") | Some("length") => {
+            "output truncated by max_tokens before any reply".into()
+        }
+        Some("refusal") | Some("content_filter") => "the model declined to answer".into(),
+        _ => "empty response".into(),
+    })
+}
+
+/// Appended to the visible reply when the step budget ran out mid-task —
+/// transcript content, so it follows the reply language (errors stay
+/// canonical-Chinese and are localized at the UI edge instead).
+fn step_limit_note(lang: &str) -> String {
+    let text = if lang.starts_with("zh-TW") {
+        "已達單回合工具步數上限，任務可能未全部完成——回覆「繼續」可接著做。"
+    } else if lang.starts_with("zh") {
+        "已达单回合工具步数上限，任务可能未全部完成——回复「继续」可接着做。"
+    } else if lang.starts_with("ja") {
+        "1ターンのツール実行上限に達しました。タスクは未完了の可能性があります。「続けて」と送ると続行します。"
+    } else if lang.starts_with("ko") {
+        "이번 턴의 도구 실행 한도에 도달했습니다. 작업이 완료되지 않았을 수 있습니다. \"계속\"이라고 보내면 이어서 진행합니다."
+    } else if lang.starts_with("es") {
+        "Se alcanzó el límite de pasos de herramientas de este turno; la tarea puede quedar incompleta. Responde «continúa» para seguir."
+    } else {
+        "Tool-step limit for this turn reached; the task may be incomplete. Reply \"continue\" to keep going."
+    };
+    format!("\n\n> {text}")
 }
 
 // ---------- Request bodies ----------
@@ -164,6 +335,10 @@ fn anthropic_history(task: &SessionTask) -> Vec<Value> {
     let mut messages: Vec<Value> = task
         .history
         .iter()
+        // A failed turn persists its user message with no assistant reply, so
+        // a fixed-size window can open on an assistant turn — Anthropic
+        // requires the first message to be user-role.
+        .skip_while(|t| t.role == Role::Assistant)
         .map(|t| {
             json!({
                 "role": match t.role { Role::User => "user", Role::Assistant => "assistant" },
@@ -175,7 +350,12 @@ fn anthropic_history(task: &SessionTask) -> Vec<Value> {
     messages
 }
 
-fn anthropic_body(task: &SessionTask, model: &str, messages: &[Value]) -> Value {
+fn anthropic_body(
+    task: &SessionTask,
+    model: &str,
+    messages: &[Value],
+    shape: EffortShape,
+) -> Value {
     let tools: Vec<Value> = tool_specs()
         .iter()
         .map(|s| json!({ "name": s.name, "description": s.description, "input_schema": s.schema }))
@@ -188,24 +368,19 @@ fn anthropic_body(task: &SessionTask, model: &str, messages: &[Value]) -> Value 
         "tools": tools,
         "stream": true,
     });
-    // Effort shapes diverge by model generation (verified 2026-07 against the
-    // extended-thinking docs):
-    // - Haiku 4.5 / Claude ≤4.5 era: legacy thinking {enabled, budget_tokens};
-    // - Fable/Mythos 5: thinking is always-on — the field must be OMITTED
-    //   (sending enabled OR disabled is a 400), effort goes via output_config;
-    // - Sonnet 5 / Opus 4.8+: adaptive thinking + output_config effort.
-    if crate::is_anthropic_effort(&task.effort) {
-        let legacy =
-            model.contains("haiku") || model.contains("-4-5") || model.contains("claude-3");
-        if legacy {
+    match shape {
+        EffortShape::Bare => {}
+        EffortShape::Legacy => {
             if let Some(budget) = thinking_budget(&task.effort) {
                 body["thinking"] = json!({ "type": "enabled", "budget_tokens": budget });
             }
-        } else {
+        }
+        EffortShape::OutputOnly => {
             body["output_config"] = json!({ "effort": task.effort });
-            if !model.contains("fable") && !model.contains("mythos") {
-                body["thinking"] = json!({ "type": "adaptive" });
-            }
+        }
+        EffortShape::Adaptive => {
+            body["output_config"] = json!({ "effort": task.effort });
+            body["thinking"] = json!({ "type": "adaptive" });
         }
     }
     body
@@ -295,7 +470,23 @@ async fn stream_step(
         }
     };
 
-    let resp = req.send().await.map_err(|e| AiError::Http(e.to_string()))?;
+    // Await in short ticks so Stop is honored within ~250ms even while the
+    // request is connecting or the stream is silent (long thinking phases),
+    // not only when the next byte happens to arrive.
+    let send_fut = req.send();
+    tokio::pin!(send_fut);
+    let resp = loop {
+        if cancel.is_cancelled() {
+            return Err(AiError::Cancelled);
+        }
+        if Instant::now() > deadline {
+            return Err(AiError::Timeout);
+        }
+        match tokio::time::timeout(CANCEL_TICK, &mut send_fut).await {
+            Err(_) => continue,
+            Ok(r) => break r.map_err(|e| AiError::Http(e.to_string()))?,
+        }
+    };
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
@@ -304,6 +495,7 @@ async fn stream_step(
 
     let mut stream = resp.bytes_stream();
     let mut parser = SseParser::default();
+    let mut last_byte = Instant::now();
     loop {
         if cancel.is_cancelled() {
             return Err(AiError::Cancelled);
@@ -311,11 +503,17 @@ async fn stream_step(
         if Instant::now() > deadline {
             return Err(AiError::Timeout);
         }
-        let chunk = match tokio::time::timeout(CHUNK_TIMEOUT, stream.next()).await {
-            Err(_) => return Err(AiError::Timeout),
+        if last_byte.elapsed() > CHUNK_TIMEOUT {
+            return Err(AiError::Timeout);
+        }
+        let chunk = match tokio::time::timeout(CANCEL_TICK, stream.next()).await {
+            Err(_) => continue,
             Ok(None) => break,
             Ok(Some(Err(e))) => return Err(AiError::Http(e.to_string())),
-            Ok(Some(Ok(c))) => c,
+            Ok(Some(Ok(c))) => {
+                last_byte = Instant::now();
+                c
+            }
         };
         for payload in parser.push(&chunk) {
             if payload == "[DONE]" {
@@ -349,6 +547,8 @@ pub(crate) enum StepAsm {
         text: String,
         calls: Vec<OpenAiCall>,
         finish: Option<String>,
+        /// OpenRouter reasoning_details entries, kept verbatim for replay.
+        reasoning: Vec<Value>,
     },
 }
 
@@ -377,6 +577,7 @@ impl StepAsm {
             text: String::new(),
             calls: Vec::new(),
             finish: None,
+            reasoning: Vec::new(),
         }
     }
 
@@ -453,10 +654,16 @@ impl StepAsm {
                 text,
                 calls,
                 finish,
+                reasoning,
             } => {
                 let choice = &v["choices"][0];
                 if let Some(r) = choice["finish_reason"].as_str() {
                     *finish = Some(r.to_string());
+                }
+                // OpenRouter streams reasoning_details for reasoning models;
+                // collected verbatim, replayed on the next step.
+                if let Some(rd) = choice["delta"]["reasoning_details"].as_array() {
+                    reasoning.extend(rd.iter().cloned());
                 }
                 if let Some(tcs) = choice["delta"]["tool_calls"].as_array() {
                     for tc in tcs {
@@ -472,7 +679,15 @@ impl StepAsm {
                             calls[idx].id = id.to_string();
                         }
                         if let Some(n) = tc["function"]["name"].as_str() {
-                            calls[idx].name.push_str(n);
+                            // Strict OpenAI streams the name once; some
+                            // OpenRouter upstreams (Gemini) resend the FULL
+                            // name on every delta — appending would yield
+                            // "search_librarysearch_library". Append only
+                            // genuine fragments.
+                            let cur = &mut calls[idx].name;
+                            if cur.is_empty() || cur.as_str() != n {
+                                cur.push_str(n);
+                            }
                         }
                         if let Some(a) = tc["function"]["arguments"].as_str() {
                             calls[idx].arguments.push_str(a);
@@ -508,13 +723,23 @@ impl StepAsm {
         }
     }
 
-    fn into_openai(self) -> (String, Vec<OpenAiCall>, Option<String>) {
+    fn into_openai(self) -> (String, Vec<OpenAiCall>, Option<String>, Vec<Value>) {
         match self {
             StepAsm::OpenAi {
                 text,
-                calls,
+                mut calls,
                 finish,
-            } => (text, calls, finish),
+                reasoning,
+            } => {
+                // A provider that omits call ids would otherwise be replayed
+                // with "" and rejected; synthesize stable ones.
+                for (i, c) in calls.iter_mut().enumerate() {
+                    if c.id.is_empty() {
+                        c.id = format!("call_{i}");
+                    }
+                }
+                (text, calls, finish, reasoning)
+            }
             StepAsm::Anthropic { .. } => unreachable!("provider mismatch"),
         }
     }
@@ -626,7 +851,7 @@ mod tests {
             ],
         );
         assert_eq!(streamed, "好的");
-        let (text, calls, finish) = asm.into_openai();
+        let (text, calls, finish, _) = asm.into_openai();
         assert_eq!(text, "好的");
         assert_eq!(finish.as_deref(), Some("tool_calls"));
         assert_eq!(calls.len(), 1);
@@ -637,12 +862,56 @@ mod tests {
     }
 
     #[test]
+    fn openai_tolerates_full_name_resends_and_missing_ids() {
+        // Gemini-via-OpenRouter resends the complete name on every delta and
+        // can omit the call id entirely.
+        let mut asm = StepAsm::new_openai();
+        feed_all(
+            &mut asm,
+            &[
+                r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"search_library","arguments":"{\"que"}}]}}]}"#,
+                r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"search_library","arguments":"ry\":\"a\"}"}}]}}]}"#,
+                r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
+            ],
+        );
+        let (_, calls, _, _) = asm.into_openai();
+        assert_eq!(calls[0].name, "search_library");
+        assert_eq!(calls[0].id, "call_0");
+    }
+
+    #[test]
+    fn openrouter_reasoning_details_are_collected_verbatim() {
+        let mut asm = StepAsm::new_openai();
+        feed_all(
+            &mut asm,
+            &[
+                r#"{"choices":[{"index":0,"delta":{"reasoning_details":[{"type":"reasoning.text","text":"想一想","index":0}]}}]}"#,
+                r#"{"choices":[{"index":0,"delta":{"reasoning_details":[{"type":"reasoning.signature","signature":"sig","index":0}]}}]}"#,
+                r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
+            ],
+        );
+        let (_, _, _, reasoning) = asm.into_openai();
+        assert_eq!(reasoning.len(), 2);
+        assert_eq!(reasoning[0]["type"], "reasoning.text");
+        assert_eq!(reasoning[1]["signature"], "sig");
+    }
+
+    fn body_for(t: &crate::SessionTask, model: &str) -> Value {
+        anthropic_body(
+            t,
+            model,
+            &anthropic_history(t),
+            detect_shape(model, &t.effort),
+        )
+    }
+
+    #[test]
     fn bodies_carry_tools_and_effort() {
         let mut t = task();
         t.effort = "high".into();
 
         // Current generation: adaptive thinking + output_config effort
-        let body = anthropic_body(&t, "claude-sonnet-5", &anthropic_history(&t));
+        let body = body_for(&t, "claude-sonnet-5");
         assert_eq!(body["tools"].as_array().unwrap().len(), 6);
         assert_eq!(body["thinking"]["type"], "adaptive");
         assert_eq!(body["output_config"]["effort"], "high");
@@ -651,11 +920,11 @@ mod tests {
             "make it dark"
         );
         // Fable: always-on thinking — the field must be omitted entirely
-        let body = anthropic_body(&t, "claude-fable-5", &anthropic_history(&t));
+        let body = body_for(&t, "claude-fable-5");
         assert!(body.get("thinking").is_none());
         assert_eq!(body["output_config"]["effort"], "high");
         // Haiku 4.5: legacy budget shape, no output_config
-        let body = anthropic_body(&t, "claude-haiku-4-5", &anthropic_history(&t));
+        let body = body_for(&t, "claude-haiku-4-5");
         assert_eq!(body["thinking"]["budget_tokens"], 24_000);
         assert!(body.get("output_config").is_none());
 
@@ -677,9 +946,76 @@ mod tests {
         t.effort = String::new();
         let body = openai_body(&t, ByokProvider::OpenAi, "gpt-5.5", &openai_history(&t));
         assert!(body.get("reasoning_effort").is_none());
-        let body = anthropic_body(&t, "claude-sonnet-5", &anthropic_history(&t));
+        let body = body_for(&t, "claude-sonnet-5");
         assert!(body.get("thinking").is_none());
         assert!(body.get("output_config").is_none());
+    }
+
+    #[test]
+    fn shape_fallback_chain_recovers_custom_models() {
+        // claude-opus-4-1 matches no marker → detected Adaptive, but it only
+        // speaks the legacy shape; the chain must offer Legacy before Bare.
+        assert_eq!(
+            detect_shape("claude-opus-4-1", "high"),
+            EffortShape::Adaptive
+        );
+        assert_eq!(
+            shape_fallbacks(EffortShape::Adaptive),
+            vec![
+                EffortShape::Adaptive,
+                EffortShape::Legacy,
+                EffortShape::Bare
+            ]
+        );
+        assert_eq!(detect_shape("claude-sonnet-5", ""), EffortShape::Bare);
+        assert_eq!(shape_fallbacks(EffortShape::Bare), vec![EffortShape::Bare]);
+
+        assert!(is_effort_shape_error(
+            "HTTP 400: Unexpected value(s) for the `thinking` parameter"
+        ));
+        assert!(is_effort_shape_error(
+            "HTTP 400: output_config: Extra inputs are not permitted"
+        ));
+        // Non-shape failures must not trigger a re-send
+        assert!(!is_effort_shape_error("HTTP 401: invalid x-api-key"));
+        assert!(!is_effort_shape_error("HTTP 400: max_tokens: too large"));
+    }
+
+    #[test]
+    fn anthropic_history_never_opens_on_assistant() {
+        let mut t = task();
+        t.history = vec![
+            crate::ChatTurn {
+                role: Role::Assistant,
+                text: "上一回合的孤儿回复".into(),
+            },
+            crate::ChatTurn {
+                role: Role::User,
+                text: "继续".into(),
+            },
+        ];
+        let msgs = anthropic_history(&t);
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[0]["content"], "继续");
+    }
+
+    #[test]
+    fn empty_reply_errors_carry_stop_reason() {
+        assert!(matches!(
+            empty_reply_error(Some("max_tokens")),
+            AiError::Provider(m) if m.contains("max_tokens")
+        ));
+        assert!(matches!(
+            empty_reply_error(Some("refusal")),
+            AiError::Provider(m) if m.contains("declined")
+        ));
+        assert!(matches!(
+            empty_reply_error(None),
+            AiError::Provider(m) if m == "empty response"
+        ));
+        assert!(step_limit_note("zh-CN").contains("步数上限"));
+        assert!(step_limit_note("en").contains("limit"));
     }
 
     #[test]

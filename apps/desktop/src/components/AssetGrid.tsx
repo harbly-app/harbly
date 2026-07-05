@@ -360,7 +360,8 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
   const editing = useStore((s) => s.editingAsset === a.id);
   const multi = useStore((s) => s.selIds.length > 1 && s.selIds.includes(a.id));
   const epoch = useStore((s) => s.thumbEpoch[a.id] || 0);
-  const t = makeT(useStore((s) => s.lang));
+  const lang = useStore((s) => s.lang);
+  const t = makeT(lang);
 
   const st = () => useStore.getState();
   const selIds = () => st().selIds;
@@ -421,7 +422,9 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
               </div>
             )}
             <div className="mt-1 flex items-center gap-1.5 text-[10.5px] text-sub">
-              <span className="shrink-0 truncate">{timeAgo(a.createdAt)}</span>
+              <span className="shrink-0 truncate">
+                {timeAgo(a.createdAt, lang)}
+              </span>
               {a.tags.slice(0, 2).map((t) => (
                 <span
                   key={t}

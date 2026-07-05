@@ -108,6 +108,15 @@ pub struct AiWriteOutcome {
     pub created: bool,
 }
 
+/// Everything needed to undo a session deletion (kept in app memory, one slot).
+#[derive(Debug, Clone)]
+pub struct AiSessionSnapshot {
+    pub session: AiSession,
+    pub messages: Vec<AiMessage>,
+    /// run id → message back-link, so undo restores ledger attribution too.
+    pub run_links: Vec<(String, Option<String>)>,
+}
+
 const RUN_COLS: &str =
     "id, asset_id, kind, supply, model, instruction, status, ver, report, error, session_id, message_id, created_at";
 
@@ -137,10 +146,14 @@ impl Library {
     /// safety net (rollback-grade undo), matching the product's undo-over-
     /// confirm rule. Returns the version number the content landed as.
     pub fn apply_ai_output(&self, id: &str, text: &str, label: &str) -> Result<i64> {
-        self.write_asset_text(id, text)?;
         let content = text.as_bytes();
         let hash = blake3::hash(content).to_hex().to_string();
-        self.write_version(id, content, &hash, label)
+        // Snapshot BEFORE mutating the live file: if the second step fails,
+        // the worst leftover is an unapplied version — never a changed file
+        // without its safety-net snapshot.
+        let ver = self.write_version(id, content, &hash, label)?;
+        self.write_asset_text(id, text)?;
+        Ok(ver)
     }
 
     /// Create a brand-new asset from AI output. `name` may carry a managed
@@ -209,12 +222,20 @@ impl Library {
                 .map(String::from)
                 .ok_or_else(|| format!("missing required argument: {key}"))
         };
+        // Model-supplied folders must stay inside the library: reject both
+        // traversal and absolute paths (Path::join would swap the root out).
+        let check_folder = |folder: &str| -> std::result::Result<(), String> {
+            if std::path::Path::new(folder).is_absolute() || folder.split('/').any(|c| c == "..") {
+                return Err(
+                    "invalid folder: must be a relative path inside the library".to_string()
+                );
+            }
+            Ok(())
+        };
         match name {
             "list_assets" => {
                 let folder = args["folder"].as_str().unwrap_or("");
-                if folder.split('/').any(|c| c == "..") {
-                    return Err("invalid folder".to_string());
-                }
+                check_folder(folder)?;
                 // "" lists the whole library recursively (inbox excluded by
                 // list_assets' own convention only for direct folders, so use
                 // all_assets for the root to include everything)
@@ -277,6 +298,12 @@ impl Library {
             "read_asset" => {
                 let id = arg_str("asset_id")?;
                 let a = self.asset(&id).map_err(|_| "asset not found".to_string())?;
+                // Gate on the indexed size BEFORE reading: a multi-hundred-MB
+                // file must not be pulled into memory just to be rejected.
+                // The post-read check stays for files grown since the scan.
+                if a.size_bytes > 400 * 1024 {
+                    return Err("file too large to read into context".to_string());
+                }
                 let content = self.read_asset_text(&id).map_err(|e| e.to_string())?;
                 if content.len() > 400 * 1024 {
                     return Err("file too large to read into context".to_string());
@@ -324,9 +351,7 @@ impl Library {
                 let name_arg = arg_str("name")?;
                 let content = arg_str("content")?;
                 let folder = args["folder"].as_str().unwrap_or("");
-                if folder.split('/').any(|c| c == "..") {
-                    return Err("invalid folder".to_string());
-                }
+                check_folder(folder)?;
                 let a = self
                     .create_asset_from_ai(folder, &name_arg, &content)
                     .map_err(|e| e.to_string())?;
@@ -475,17 +500,87 @@ impl Library {
         Ok(())
     }
 
-    /// Delete the conversation. Assets and versions it produced are untouched;
-    /// their run rows lose the back-link (session_id nulled) but stay on the
-    /// file timeline.
-    pub fn delete_ai_session(&self, id: &str) -> Result<()> {
+    /// Drop a dead agent resume id (the CLI garbage-collects its sessions);
+    /// the next turn replays the transcript app-side instead.
+    pub fn clear_ai_session_agent_id(&self, id: &str) -> Result<()> {
         let db = self.db.lock().unwrap();
-        db.execute("DELETE FROM ai_sessions WHERE id=?1", [id])?;
-        db.execute("DELETE FROM ai_messages WHERE session_id=?1", [id])?;
         db.execute(
+            "UPDATE ai_sessions SET agent_session_id=NULL WHERE id=?1",
+            [id],
+        )?;
+        Ok(())
+    }
+
+    /// Delete the conversation and hand back a snapshot that
+    /// [`Library::restore_ai_session`] can resurrect — panel deletion is
+    /// undo-based, not confirm-based (the product's undo-over-confirm rule).
+    /// Assets and versions the session produced are untouched; their run rows
+    /// lose the back-link (session_id nulled) but stay on the file timeline.
+    /// Returns None when the session does not exist.
+    pub fn delete_ai_session(&self, id: &str) -> Result<Option<AiSessionSnapshot>> {
+        let Some(session) = self.get_ai_session(id)? else {
+            return Ok(None);
+        };
+        let messages = self.list_ai_messages(id)?;
+        let db = self.db.lock().unwrap();
+        let run_links: Vec<(String, Option<String>)> = {
+            let mut stmt = db.prepare("SELECT id, message_id FROM ai_runs WHERE session_id=?1")?;
+            let rows = stmt
+                .query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        // One transaction: a crash cannot leave the session half-deleted
+        let tx = db.unchecked_transaction()?;
+        tx.execute("DELETE FROM ai_sessions WHERE id=?1", [id])?;
+        tx.execute("DELETE FROM ai_messages WHERE session_id=?1", [id])?;
+        tx.execute(
             "UPDATE ai_runs SET session_id=NULL, message_id=NULL WHERE session_id=?1",
             [id],
         )?;
+        tx.commit()?;
+        Ok(Some(AiSessionSnapshot {
+            session,
+            messages,
+            run_links,
+        }))
+    }
+
+    /// Undo of [`Library::delete_ai_session`]: reinsert the session, its
+    /// transcript, and the run back-links, with original ids and timestamps.
+    pub fn restore_ai_session(&self, snap: &AiSessionSnapshot) -> Result<()> {
+        let db = self.db.lock().unwrap();
+        let tx = db.unchecked_transaction()?;
+        let s = &snap.session;
+        tx.execute(
+            "INSERT OR REPLACE INTO ai_sessions(id, title, supply, model, effort, agent_session_id, created_at, updated_at)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![
+                s.id,
+                s.title,
+                s.supply,
+                s.model,
+                s.effort,
+                s.agent_session_id,
+                s.created_at,
+                s.updated_at
+            ],
+        )?;
+        for m in &snap.messages {
+            let actions_json = serde_json::to_string(&m.actions).unwrap_or_else(|_| "[]".into());
+            tx.execute(
+                "INSERT OR REPLACE INTO ai_messages(id, session_id, role, content, actions, created_at)
+                 VALUES(?1,?2,?3,?4,?5,?6)",
+                params![m.id, m.session_id, m.role, m.content, actions_json, m.created_at],
+            )?;
+        }
+        for (run_id, message_id) in &snap.run_links {
+            tx.execute(
+                "UPDATE ai_runs SET session_id=?2, message_id=?3 WHERE id=?1",
+                params![run_id, s.id, message_id],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
     }
 

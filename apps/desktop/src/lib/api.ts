@@ -106,6 +106,8 @@ export const api = {
   aiSessionCreate: (supply: string, model: string, effort: string) =>
     invoke<AiSession>("ai_session_create", { supply, model, effort }),
   aiSessionDelete: (id: string) => invoke<null>("ai_session_delete", { id }),
+  /** Undo the most recent session deletion; resolves with the restored id. */
+  aiSessionRestore: () => invoke<string | null>("ai_session_restore"),
   aiSessionSetPrefs: (
     id: string,
     supply: string,
@@ -154,19 +156,25 @@ export const thumbUrl = (hash: string) =>
 export const versionUrl = (id: string, ver: number) =>
   `harbly-asset://localhost/version/${encodeURIComponent(id)}/${ver}`;
 
-export function timeAgo(epochSec: number): string {
+/** Relative time in the UI language (the app's six locales are all valid
+ * BCP-47 tags, so they feed Intl directly). */
+export function timeAgo(epochSec: number, lang = "zh-CN"): string {
   const s = Math.max(0, Math.floor(Date.now() / 1000) - epochSec);
-  if (s < 60) return "刚刚";
+  const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
+  if (s < 60) return rtf.format(0, "second");
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m} 分钟前`;
+  if (m < 60) return rtf.format(-m, "minute");
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小时前`;
+  if (h < 24) return rtf.format(-h, "hour");
   const d = Math.floor(h / 24);
-  if (d < 7) return `${d} 天前`;
+  if (d < 7) return rtf.format(-d, "day");
   const w = Math.floor(d / 7);
-  if (w < 5) return `${w} 周前`;
-  const dt = new Date(epochSec * 1000);
-  return `${dt.getFullYear()}/${dt.getMonth() + 1}/${dt.getDate()}`;
+  if (w < 5) return rtf.format(-w, "week");
+  return new Intl.DateTimeFormat(lang, {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).format(new Date(epochSec * 1000));
 }
 
 export function fmtSize(bytes: number): string {

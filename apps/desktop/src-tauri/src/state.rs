@@ -30,6 +30,12 @@ pub struct AppState {
     /// Running AI tasks: frontend job id → cancel flag. Entries are removed
     /// when the run finishes; ai_cancel flips the flag cooperatively.
     pub ai_jobs: Mutex<std::collections::HashMap<String, harbly_ai::CancelFlag>>,
+    /// Sessions with a turn in flight — the backend guard against concurrent
+    /// turns interleaving one transcript (the UI serializes, but correctness
+    /// must not depend on it).
+    pub ai_busy: Mutex<std::collections::HashSet<String>>,
+    /// Most recent deleted AI session, held for the undo toast (single slot).
+    pub ai_deleted_session: Mutex<Option<harbly_core::AiSessionSnapshot>>,
 }
 
 /// A completed file operation. Executing it (undo and redo share one executor)
