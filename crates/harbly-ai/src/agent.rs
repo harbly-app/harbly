@@ -205,6 +205,11 @@ pub(crate) async fn run_claude_turn(
     if let Some(m) = model {
         cmd.args(["--model", m]);
     }
+    // Claude Code's session effort knob (low|medium|high|xhigh|max); our
+    // levels are a valid subset. Unsupported levels fall back model-side.
+    if !task.effort.is_empty() {
+        cmd.args(["--effort", &task.effort]);
+    }
     cmd.current_dir(workdir);
 
     let parsed = run_agent_process(cmd, AgentKind::ClaudeCode, cancel, on_event).await?;
@@ -779,15 +784,11 @@ mod tests {
             workdir: dir.path().to_path_buf(),
             mcp_config_json: Some(r#"{"mcpServers":{"harbly":{"command":"x"}}}"#.into()),
         };
-        let out = run_claude_turn(
-            &task(),
-            &supply,
-            Some("prev-1"),
-            CancelFlag::new(),
-            &mut |_| {},
-        )
-        .await
-        .unwrap();
+        let mut t = task();
+        t.effort = "high".into();
+        let out = run_claude_turn(&t, &supply, Some("prev-1"), CancelFlag::new(), &mut |_| {})
+            .await
+            .unwrap();
         assert_eq!(out.reply, "ok");
         assert_eq!(out.agent_session_id.as_deref(), Some("s-9"));
         let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
@@ -795,5 +796,7 @@ mod tests {
         assert!(args.contains("--mcp-config"));
         assert!(args.contains("--allowedTools mcp__harbly,mcp__harbly__*"));
         assert!(args.contains("--model sonnet"));
+        // Effort reaches Claude Code as its session --effort flag
+        assert!(args.contains("--effort high"));
     }
 }

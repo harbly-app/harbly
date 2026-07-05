@@ -16,7 +16,7 @@ import { api, versionUrl } from "../lib/api";
 import { LANGS, makeT } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import type { ThemePref } from "../lib/theme";
-import type { AgentInfo, AiConfig, ByokProvider, TreeNode } from "../lib/types";
+import type { AgentInfo, ByokProvider, TreeNode } from "../lib/types";
 import { BYOK_PROVIDERS } from "../lib/types";
 
 export default function Modals() {
@@ -296,22 +296,15 @@ const BYOK_LABEL: Record<ByokProvider, string> = {
   openai: "OpenAI API",
   openrouter: "OpenRouter",
 };
-/** Placeholder = the backend fallback model, so an empty field is honest */
-const BYOK_DEFAULT_MODEL: Record<ByokProvider, string> = {
-  anthropic: "claude-sonnet-5",
-  openai: "gpt-5.1",
-  openrouter: "anthropic/claude-sonnet-5",
-};
-
 /** AI section of settings: local agent detection status (read-only) + one
- * key/model pair per BYOK provider. Keys go straight to the OS keychain. */
+ * API key per BYOK provider (straight to the OS keychain). Model and effort
+ * are chosen per conversation in the panel, not here. */
 function AiSettings() {
   const t = makeT(useStore((s) => s.lang));
   const showToast = useStore((s) => s.showToast);
   const bumpAiConfig = useStore((s) => s.bumpAiConfig);
   const [agents, setAgents] = useState<AgentInfo[] | null>(null);
   const [keys, setKeys] = useState<Record<string, boolean>>({});
-  const [config, setConfig] = useState<AiConfig>({});
   const [drafts, setDrafts] = useState<Partial<Record<ByokProvider, string>>>(
     {},
   );
@@ -320,11 +313,9 @@ function AiSettings() {
     void Promise.all([
       api.aiDetectAgents().catch(() => [] as AgentInfo[]),
       api.aiKeyStatus().catch(() => ({})),
-      api.aiGetConfig().catch(() => ({})),
-    ]).then(([a, k, c]) => {
+    ]).then(([a, k]) => {
       setAgents(a);
       setKeys(k);
-      setConfig(c);
     });
   }, []);
 
@@ -351,21 +342,6 @@ function AiSettings() {
     } catch (e) {
       showToast(String(e));
     }
-  };
-
-  const saveModel = (p: ByokProvider, model: string) => {
-    // Rebuild without empty entries (an empty field means "use the default")
-    const models = Object.fromEntries(
-      Object.entries({ ...config.models, [p]: model.trim() }).filter(
-        ([, v]) => v,
-      ),
-    ) as AiConfig["models"];
-    const next = { ...config, models };
-    setConfig(next);
-    api
-      .aiSetConfig(next)
-      .then(() => bumpAiConfig())
-      .catch(() => {});
   };
 
   return (
@@ -430,13 +406,6 @@ function AiSettings() {
                   </button>
                 )}
               </div>
-              <input
-                defaultValue={config.models?.[p] ?? ""}
-                onBlur={(e) => saveModel(p, e.target.value)}
-                placeholder={BYOK_DEFAULT_MODEL[p]}
-                title={t("aiModelLabel")}
-                className="h-7 w-[150px] shrink-0 rounded-ctl border border-line bg-card px-2 text-[11px] outline-none focus:border-primary"
-              />
             </div>
           ))}
       </div>

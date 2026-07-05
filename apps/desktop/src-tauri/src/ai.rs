@@ -31,10 +31,12 @@ const HISTORY_TURNS: usize = 30;
 
 pub const BYOK_PROVIDERS: [&str; 3] = ["anthropic", "openai", "openrouter"];
 
+/// Fallbacks when the session pins nothing (verified against provider docs
+/// 2026-07; the per-session picker mirrors these).
 fn default_model(provider: ByokProvider) -> &'static str {
     match provider {
         ByokProvider::Anthropic => "claude-sonnet-5",
-        ByokProvider::OpenAi => "gpt-5.1",
+        ByokProvider::OpenAi => "gpt-5.5",
         ByokProvider::OpenRouter => "anthropic/claude-sonnet-5",
     }
 }

@@ -24,14 +24,7 @@ const CHUNK_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_STEPS: usize = 12;
 const ANTHROPIC_MAX_TOKENS: u32 = 32_768;
 
-fn thinking_budget(effort: &str) -> Option<u32> {
-    match effort {
-        "low" => Some(4_000),
-        "medium" => Some(10_000),
-        "high" => Some(24_000),
-        _ => None,
-    }
-}
+use crate::thinking_budget;
 
 pub(crate) async fn run_turn(
     task: &SessionTask,
@@ -102,7 +95,7 @@ pub(crate) async fn run_turn(
         ByokProvider::OpenAi | ByokProvider::OpenRouter => {
             let mut messages = openai_history(task);
             for _ in 0..MAX_STEPS {
-                let body = openai_body(task, model, &messages);
+                let body = openai_body(task, provider, model, &messages);
                 let asm = stream_step(
                     &client,
                     provider,
@@ -195,8 +188,25 @@ fn anthropic_body(task: &SessionTask, model: &str, messages: &[Value]) -> Value 
         "tools": tools,
         "stream": true,
     });
-    if let Some(budget) = thinking_budget(&task.effort) {
-        body["thinking"] = json!({ "type": "enabled", "budget_tokens": budget });
+    // Effort shapes diverge by model generation (verified 2026-07 against the
+    // extended-thinking docs):
+    // - Haiku 4.5 / Claude ≤4.5 era: legacy thinking {enabled, budget_tokens};
+    // - Fable/Mythos 5: thinking is always-on — the field must be OMITTED
+    //   (sending enabled OR disabled is a 400), effort goes via output_config;
+    // - Sonnet 5 / Opus 4.8+: adaptive thinking + output_config effort.
+    if !task.effort.is_empty() {
+        let legacy =
+            model.contains("haiku") || model.contains("-4-5") || model.contains("claude-3");
+        if legacy {
+            if let Some(budget) = thinking_budget(&task.effort) {
+                body["thinking"] = json!({ "type": "enabled", "budget_tokens": budget });
+            }
+        } else {
+            body["output_config"] = json!({ "effort": task.effort });
+            if !model.contains("fable") && !model.contains("mythos") {
+                body["thinking"] = json!({ "type": "adaptive" });
+            }
+        }
     }
     body
 }
@@ -213,7 +223,12 @@ fn openai_history(task: &SessionTask) -> Vec<Value> {
     messages
 }
 
-fn openai_body(task: &SessionTask, model: &str, messages: &[Value]) -> Value {
+fn openai_body(
+    task: &SessionTask,
+    provider: ByokProvider,
+    model: &str,
+    messages: &[Value],
+) -> Value {
     let tools: Vec<Value> = tool_specs()
         .iter()
         .map(|s| {
@@ -230,7 +245,14 @@ fn openai_body(task: &SessionTask, model: &str, messages: &[Value]) -> Value {
         "stream": true,
     });
     if !task.effort.is_empty() {
-        body["reasoning_effort"] = json!(task.effort);
+        if provider == ByokProvider::OpenRouter {
+            // OpenRouter's canonical cross-provider knob; it normalizes to each
+            // upstream's native parameter (reasoning_effort passthrough is
+            // inconsistent there).
+            body["reasoning"] = json!({ "effort": task.effort });
+        } else {
+            body["reasoning_effort"] = json!(task.effort);
+        }
     }
     body
 }
@@ -618,24 +640,46 @@ mod tests {
     fn bodies_carry_tools_and_effort() {
         let mut t = task();
         t.effort = "high".into();
+
+        // Current generation: adaptive thinking + output_config effort
         let body = anthropic_body(&t, "claude-sonnet-5", &anthropic_history(&t));
         assert_eq!(body["tools"].as_array().unwrap().len(), 4);
-        assert_eq!(body["thinking"]["budget_tokens"], 24_000);
+        assert_eq!(body["thinking"]["type"], "adaptive");
+        assert_eq!(body["output_config"]["effort"], "high");
         assert_eq!(
             body["messages"].as_array().unwrap().last().unwrap()["content"],
             "make it dark"
         );
+        // Fable: always-on thinking — the field must be omitted entirely
+        let body = anthropic_body(&t, "claude-fable-5", &anthropic_history(&t));
+        assert!(body.get("thinking").is_none());
+        assert_eq!(body["output_config"]["effort"], "high");
+        // Haiku 4.5: legacy budget shape, no output_config
+        let body = anthropic_body(&t, "claude-haiku-4-5", &anthropic_history(&t));
+        assert_eq!(body["thinking"]["budget_tokens"], 24_000);
+        assert!(body.get("output_config").is_none());
 
-        let body = openai_body(&t, "gpt-5.1", &openai_history(&t));
+        let body = openai_body(&t, ByokProvider::OpenAi, "gpt-5.5", &openai_history(&t));
         assert_eq!(body["reasoning_effort"], "high");
         assert_eq!(body["tools"][0]["function"]["name"], "search_library");
         assert_eq!(body["messages"][0]["role"], "system");
-
-        t.effort = String::new();
-        let body = openai_body(&t, "gpt-5.1", &openai_history(&t));
+        // OpenRouter uses its canonical reasoning object instead
+        let body = openai_body(
+            &t,
+            ByokProvider::OpenRouter,
+            "anthropic/claude-sonnet-5",
+            &openai_history(&t),
+        );
         assert!(body.get("reasoning_effort").is_none());
-        let body = anthropic_body(&t, "m", &anthropic_history(&t));
+        assert_eq!(body["reasoning"]["effort"], "high");
+
+        // No effort → no knobs at all (model defaults apply)
+        t.effort = String::new();
+        let body = openai_body(&t, ByokProvider::OpenAi, "gpt-5.5", &openai_history(&t));
+        assert!(body.get("reasoning_effort").is_none());
+        let body = anthropic_body(&t, "claude-sonnet-5", &anthropic_history(&t));
         assert!(body.get("thinking").is_none());
+        assert!(body.get("output_config").is_none());
     }
 
     #[test]

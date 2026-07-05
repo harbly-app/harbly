@@ -25,7 +25,6 @@ import type {
   AiRun,
   AiSession,
   AiSupply,
-  ByokProvider,
   VersionInfo,
 } from "../lib/types";
 
@@ -576,10 +575,29 @@ function SessionMenu({
   );
 }
 
-/** Model/effort defaults shown as placeholders — empty means backend default */
-const BYOK_DEFAULT_MODEL: Record<ByokProvider, string> = {
+/** Curated model choices per supply ("" = supply default, custom row covers
+ * the rest). Ids verified against provider docs 2026-07-04 — note OpenRouter
+ * spells Anthropic versions with dots (claude-opus-4.8) while the Anthropic
+ * API uses dashes. A stale list is only cosmetic: the custom row accepts
+ * anything. */
+const MODEL_CHOICES: Record<AiSupply, string[]> = {
+  claude: ["opus", "sonnet", "haiku", "fable"],
+  codex: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
+  anthropic: ["claude-opus-4-8", "claude-haiku-4-5", "claude-fable-5"],
+  openai: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.2"],
+  openrouter: [
+    "openai/gpt-5.5",
+    "google/gemini-3.1-pro-preview",
+    "google/gemini-3.5-flash",
+    "anthropic/claude-opus-4.8",
+  ],
+};
+
+/** What "default" resolves to (mirrors the backend fallback); agents pick
+ * their own default so they get no hint. */
+const DEFAULT_MODEL_HINT: Partial<Record<AiSupply, string>> = {
   anthropic: "claude-sonnet-5",
-  openai: "gpt-5.1",
+  openai: "gpt-5.5",
   openrouter: "anthropic/claude-sonnet-5",
 };
 
@@ -594,18 +612,34 @@ function PrefsMenu({
   prefs: Prefs;
   onChange: (p: Prefs) => void;
 }) {
+  const choices = prefs.supply ? MODEL_CHOICES[prefs.supply] : [];
+  // The custom row stays active while its value duplicates nothing curated
+  const [custom, setCustom] = useState(
+    () => prefs.model !== "" && !choices.includes(prefs.model),
+  );
   const effortChoices: { v: AiEffort; label: string }[] = [
     { v: "", label: t("aiEffortDefault") },
     { v: "low", label: t("aiEffortLow") },
     { v: "medium", label: t("aiEffortMedium") },
     { v: "high", label: t("aiEffortHigh") },
   ];
-  // Claude Code has no effort knob; everyone else maps it natively
-  const effortSupported = prefs.supply !== "claude";
-  const modelPlaceholder =
-    prefs.supply && prefs.supply in BYOK_DEFAULT_MODEL
-      ? BYOK_DEFAULT_MODEL[prefs.supply as ByokProvider]
-      : t("aiModelDefault");
+  const defaultHint = prefs.supply ? DEFAULT_MODEL_HINT[prefs.supply] : null;
+
+  const modelRow = (value: string, label: string, activeWhen: boolean) => (
+    <button
+      key={value || "default"}
+      onClick={() => {
+        setCustom(false);
+        onChange({ ...prefs, model: value });
+      }}
+      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition hover:bg-side ${
+        activeWhen ? "font-bold text-primary" : ""
+      }`}
+    >
+      <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+      {activeWhen && <Check className="h-3 w-3 shrink-0" />}
+    </button>
+  );
 
   return (
     <MenuShell>
@@ -615,7 +649,10 @@ function PrefsMenu({
       {options.map((o) => (
         <button
           key={o.id}
-          onClick={() => onChange({ ...prefs, supply: o.id, model: "" })}
+          onClick={() => {
+            setCustom(false);
+            onChange({ ...prefs, supply: o.id, model: "" });
+          }}
           className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition hover:bg-side ${
             prefs.supply === o.id ? "font-bold text-primary" : ""
           }`}
@@ -630,36 +667,54 @@ function PrefsMenu({
       <div className="px-2.5 pt-2 pb-1 text-[10.5px] font-bold text-sub">
         {t("aiModelLabel")}
       </div>
-      <div className="px-2.5 pb-1.5">
-        <input
-          value={prefs.model}
-          onChange={(e) => onChange({ ...prefs, model: e.target.value })}
-          placeholder={modelPlaceholder}
-          className="h-7 w-full rounded-ctl border border-line bg-side px-2 text-[11px] outline-none focus:border-primary"
-        />
-      </div>
-      {effortSupported && (
-        <>
-          <div className="px-2.5 pt-1 pb-1 text-[10.5px] font-bold text-sub">
-            Effort
-          </div>
-          <div className="flex gap-1 px-2.5 pb-2">
-            {effortChoices.map((c) => (
-              <button
-                key={c.v}
-                onClick={() => onChange({ ...prefs, effort: c.v })}
-                className={`h-6 flex-1 rounded-ctl border text-[10.5px] transition ${
-                  prefs.effort === c.v
-                    ? "border-primary bg-primary/10 font-bold text-primary"
-                    : "border-line bg-side text-sub2 hover:border-primary/40"
-                }`}
-              >
-                {c.label}
-              </button>
-            ))}
-          </div>
-        </>
+      {modelRow(
+        "",
+        defaultHint
+          ? `${t("aiModelDefault")} · ${defaultHint}`
+          : t("aiModelDefault"),
+        !custom && prefs.model === "",
       )}
+      {choices.map((m) => modelRow(m, m, !custom && prefs.model === m))}
+      <button
+        onClick={() => setCustom(true)}
+        className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition hover:bg-side ${
+          custom ? "font-bold text-primary" : ""
+        }`}
+      >
+        <span className="min-w-0 flex-1 truncate text-left">
+          {t("aiModelCustom")}
+        </span>
+        {custom && <Check className="h-3 w-3 shrink-0" />}
+      </button>
+      {custom && (
+        <div className="px-2.5 pt-0.5 pb-1.5">
+          <input
+            autoFocus
+            value={prefs.model}
+            onChange={(e) => onChange({ ...prefs, model: e.target.value })}
+            placeholder={defaultHint ?? "model id"}
+            className="h-7 w-full rounded-ctl border border-line bg-side px-2 text-[11px] outline-none focus:border-primary"
+          />
+        </div>
+      )}
+      <div className="px-2.5 pt-1 pb-1 text-[10.5px] font-bold text-sub">
+        Effort
+      </div>
+      <div className="flex gap-1 px-2.5 pb-2">
+        {effortChoices.map((c) => (
+          <button
+            key={c.v}
+            onClick={() => onChange({ ...prefs, effort: c.v })}
+            className={`h-6 flex-1 rounded-ctl border text-[10.5px] transition ${
+              prefs.effort === c.v
+                ? "border-primary bg-primary/10 font-bold text-primary"
+                : "border-line bg-side text-sub2 hover:border-primary/40"
+            }`}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
     </MenuShell>
   );
 }

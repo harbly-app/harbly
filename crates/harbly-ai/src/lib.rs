@@ -191,6 +191,17 @@ impl CancelFlag {
 
 pub type EventSink<'a> = &'a mut (dyn FnMut(AiEvent) + Send);
 
+/// Effort → thinking-token budget, shared by the Anthropic API body and the
+/// Claude Code child environment (MAX_THINKING_TOKENS).
+pub(crate) fn thinking_budget(effort: &str) -> Option<u32> {
+    match effort {
+        "low" => Some(4_000),
+        "medium" => Some(10_000),
+        "high" => Some(24_000),
+        _ => None,
+    }
+}
+
 /// Run one conversation turn on the given supply. `resume` is the agent CLI's
 /// session id from the previous turn (None for the first turn / BYOK).
 pub async fn run_turn(
