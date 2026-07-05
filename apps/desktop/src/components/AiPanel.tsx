@@ -12,8 +12,16 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Markdown from "react-markdown";
+import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, timeAgo } from "../lib/api";
 import { localizeAiError, localizeVerLabel, makeT } from "../lib/i18n";
@@ -1025,25 +1033,7 @@ function MessageRow({
         </div>
       )}
       <div className="ai-md text-xs leading-relaxed select-text">
-        <Markdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            // The webview must never navigate; links open in the browser
-            a: ({ href, children }) => (
-              <a
-                href={href}
-                onClick={(e) => {
-                  e.preventDefault();
-                  if (href) api.openUrl(href).catch(() => {});
-                }}
-              >
-                {children}
-              </a>
-            ),
-          }}
-        >
-          {m.content}
-        </Markdown>
+        <Md text={m.content} />
       </div>
       {writes.map((w) => (
         <div
@@ -1078,9 +1068,43 @@ function MessageRow({
   );
 }
 
+/** Markdown rendered once per distinct content — parsing is the hot cost, so
+ * neither streaming deltas nor unrelated re-renders may re-run it for old
+ * messages. Link clicks open in the browser (the webview must never navigate);
+ * `javascript:` etc. are already stripped by react-markdown's urlTransform and
+ * rejected backend-side. */
+const MD_COMPONENTS: Components = {
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      onClick={(e) => {
+        e.preventDefault();
+        if (href) api.openUrl(href).catch(() => {});
+      }}
+    >
+      {children}
+    </a>
+  ),
+};
+
+function Md({ text }: { text: string }) {
+  return useMemo(
+    () => (
+      <Markdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+        {text}
+      </Markdown>
+    ),
+    [text],
+  );
+}
+
 function LiveBlock({ live, t }: { live: LiveRun; t: TFn }) {
-  // Show only the streaming tail — long replies scroll, they don't flood
-  const tail = live.text.length > 600 ? `…${live.text.slice(-600)}` : live.text;
+  // Live markdown, Claude Code-style: the streaming text renders through the
+  // SAME pipeline as the persisted message (identical classes → the end-of-
+  // turn swap is invisible). Unclosed constructs show as raw source until
+  // their closing token streams in. useDeferredValue lets fast delta bursts
+  // skip intermediate parses instead of reparsing per token.
+  const text = useDeferredValue(live.text);
   return (
     <div className="mr-2">
       <div className="flex flex-col gap-0.5">
@@ -1098,9 +1122,9 @@ function LiveBlock({ live, t }: { live: LiveRun; t: TFn }) {
         <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-[1.5px] border-primary/30 border-t-primary" />
         {t("aiRunning")}
       </div>
-      {tail && (
-        <div className="mt-1 text-xs leading-relaxed whitespace-pre-wrap text-sub2">
-          {tail}
+      {text && (
+        <div className="ai-md mt-1 text-xs leading-relaxed select-text">
+          <Md text={text} />
         </div>
       )}
     </div>
