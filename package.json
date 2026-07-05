@@ -8,6 +8,7 @@
     "dev:landing": "pnpm --filter @harbly/landing dev",
     "build:landing": "pnpm --filter @harbly/landing build",
     "test:core": "cargo test -p harbly-core",
+    "test:desktop": "pnpm --filter @harbly/desktop test",
     "format": "prettier --write --cache --ignore-path .prettierignore . && cargo fmt --all",
     "format:check": "prettier --check --cache --ignore-path .prettierignore . && cargo fmt --all --check",
     "lint": "eslint --cache --cache-location node_modules/.cache/eslint/ --max-warnings 0 . && cargo clippy --workspace --all-targets -- -D warnings",

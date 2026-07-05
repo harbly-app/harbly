@@ -1,5 +1,6 @@
 mod ai;
 mod commands;
+mod hdoc_template;
 mod i18n;
 mod md_template;
 mod menu;
@@ -36,6 +37,8 @@ pub fn run() {
             commands::asset_write,
             commands::asset_checkpoint,
             commands::asset_new_markdown,
+            commands::asset_new_hdoc,
+            commands::export_hdoc_html,
             commands::import_paths,
             commands::pick_and_import,
             commands::search_assets,

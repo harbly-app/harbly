@@ -15,7 +15,7 @@ import { useState } from "react";
 import { api } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import { useStore } from "../lib/store";
-import { INBOX, isMd } from "../lib/types";
+import { INBOX, isHdoc, isMd } from "../lib/types";
 import { windowDrag } from "../lib/drag";
 
 export default function TitleBar() {
@@ -112,7 +112,7 @@ export default function TitleBar() {
 
           <div className="flex-1" />
 
-          {isMd(viewer.fileName) && (
+          {(isMd(viewer.fileName) || isHdoc(viewer.fileName)) && (
             <button
               onClick={toggleMdWide}
               title={t("mdEditorWidth")}
@@ -141,7 +141,7 @@ export default function TitleBar() {
           <button
             onClick={() => api.openInBrowser(viewer.id).catch(() => {})}
             title={
-              isMd(viewer.fileName)
+              isMd(viewer.fileName) || isHdoc(viewer.fileName)
                 ? t("openWithDefaultApp")
                 : t("openInBrowser")
             }

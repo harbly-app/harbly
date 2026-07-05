@@ -395,6 +395,113 @@ fn import_mixed_html_and_markdown() {
     assert!(!harbly_core::is_managed_name("c.txt"));
 }
 
+/// Build an hdoc document with a title heading and optional extra block markup.
+fn hdoc(title: &str, extra: &str) -> String {
+    format!(
+        "<h-doc v=\"1\" theme=\"paper\">\n  <h1>{title}</h1>\n  <p>正文段落</p>\n{extra}</h-doc>\n"
+    )
+}
+
+#[test]
+fn hdoc_scan_title_attrs_and_fts() {
+    let (_tmp, lib) = setup();
+    let root = lib.root().to_path_buf();
+    fs::write(
+        root.join("方案.hdoc"),
+        hdoc(
+            "发布方案",
+            "  <h-callout kind=\"tip\" title=\"定价结论\"><p>按席位收费</p></h-callout>\n",
+        ),
+    )
+    .unwrap();
+    fs::write(
+        root.join("blank.hdoc"),
+        "<h-doc v=\"1\"><h1></h1><p>no heading text here</p></h-doc>",
+    )
+    .unwrap();
+
+    let sum = lib.scan(|_| {}).unwrap();
+    assert_eq!(sum.added, 2);
+
+    let all = lib.list_assets("", SortKey::Name).unwrap();
+    let title_of = |name: &str| {
+        all.iter()
+            .find(|a| a.file_name == name)
+            .unwrap()
+            .title
+            .clone()
+    };
+    assert_eq!(title_of("方案.hdoc"), "发布方案");
+    assert_eq!(title_of("blank.hdoc"), "blank"); // empty <h1> → file stem
+
+    // Component ATTRIBUTE text (callout title) is searchable via the jieba path
+    let hits = lib.search("定价").unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].asset.file_name, "方案.hdoc");
+    // Element text inside components is searchable too
+    let hits = lib.search("席位").unwrap();
+    assert_eq!(hits.len(), 1);
+}
+
+#[test]
+fn hdoc_rename_preserves_extension() {
+    let (_tmp, lib) = setup();
+    fs::write(lib.root().join("page.hdoc"), hdoc("页", "")).unwrap();
+    lib.scan(|_| {}).unwrap();
+    let a = lib.list_assets("", SortKey::Recent).unwrap().remove(0);
+
+    let r = lib.rename_asset(&a.id, "改名").unwrap();
+    assert_eq!(r.file_name, "改名.hdoc");
+    // Typing another managed extension never converts the type
+    let r = lib.rename_asset(&a.id, "again.md").unwrap();
+    assert_eq!(r.file_name, "again.hdoc");
+    assert!(lib.rename_asset(&a.id, ".hdoc").is_err());
+}
+
+#[test]
+fn hdoc_create_autosave_checkpoint_versions() {
+    let (_tmp, lib) = setup();
+    let a = lib.create_hdoc_asset("", "页面").unwrap();
+    assert_eq!(a.file_name, "页面.hdoc");
+    assert_eq!(a.ver_count, 1);
+    assert_eq!(a.title, "页面"); // the skeleton's <h1> is empty → stem
+    let disk = fs::read_to_string(lib.root().join("页面.hdoc")).unwrap();
+    assert!(disk.contains("<h-doc v=\"1\""));
+
+    let base = a.current_hash.clone();
+    let a2 = lib
+        .write_asset_text(
+            &a.id,
+            "<h-doc v=\"1\" theme=\"paper\">\n  <h1>路线图</h1>\n  <p>内容</p>\n</h-doc>\n",
+        )
+        .unwrap();
+    assert_eq!(a2.title, "路线图");
+    assert_eq!(a2.ver_count, 1); // autosave never versions
+
+    // The in-app write is echo-suppressed: a scan sees no external change
+    let sum = lib.scan(|_| {}).unwrap();
+    assert!(!sum.changed());
+
+    // Session end → one "编辑" version, snapshot carries the .hdoc extension
+    assert_eq!(lib.checkpoint_version(&a.id, &base).unwrap(), Some(2));
+    assert!(lib.version_file_path(&a.id, 2).ends_with("v2.hdoc"));
+
+    lib.restore_version(&a.id, 1).unwrap();
+    let restored = fs::read_to_string(lib.root().join("页面.hdoc")).unwrap();
+    assert!(restored.contains("<h1></h1>"));
+}
+
+#[test]
+fn import_hdoc_files() {
+    let (tmp, lib) = setup();
+    let outside = tmp.path().join("out");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("d.hdoc"), hdoc("导入页", "")).unwrap();
+    let r = lib.import_files(&[outside.join("d.hdoc")], "").unwrap();
+    assert_eq!(r.added, 1);
+    assert!(harbly_core::is_managed_name("d.hdoc"));
+}
+
 #[test]
 fn md_render_rewrites_relative_images() {
     // Relative images are rewritten to resolve through the asset protocol

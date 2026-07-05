@@ -320,3 +320,208 @@ textarea,
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Page editor (hdoc): ProseMirror mounts on a real <h-doc>, so the shared
+   runtime CSS (imported by HdocEditor from src-tauri/assets) provides the
+   document look; everything below is editor chrome. Attribute text (titles,
+   captions, stat values) is edited via .hd-fields inputs, so the runtime's
+   attr()-driven pseudo content is suppressed inside the editor. */
+.hdoc-editor .hdoc-wrap {
+  position: relative;
+}
+.hdoc-editor h-doc {
+  min-height: 100%;
+  outline: none;
+}
+.hdoc-editor .ProseMirror {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  caret-color: var(--hd-accent);
+}
+.hdoc-wide h-doc > * {
+  max-width: none;
+}
+.hdoc-editor .ProseMirror-selectednode {
+  outline: 2px solid var(--hd-accent);
+  border-radius: 4px;
+}
+.hd-dropcursor {
+  background-color: var(--hd-accent);
+}
+
+/* Suppress runtime pseudo-content that the editor replaces with inputs */
+.hdoc-editor h-callout::before,
+.hdoc-editor h-card::before,
+.hdoc-editor h-step::before,
+.hdoc-editor h-quote::after,
+.hdoc-editor h-figure::after,
+.hdoc-editor h-stat::before,
+.hdoc-editor h-stat::after {
+  content: none;
+}
+/* Collapsible sections stay expanded while editing */
+.hdoc-editor h-details > div {
+  display: block;
+}
+.hdoc-editor h-details {
+  padding-top: 4px;
+  padding-bottom: 12px;
+}
+
+.hd-fields {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.hd-body > :last-child {
+  margin-bottom: 0;
+}
+.hd-attr {
+  font: inherit;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: inherit;
+  padding: 0;
+  min-width: 0;
+}
+.hd-attr::placeholder {
+  color: var(--hd-sub);
+  opacity: 0.5;
+}
+input.hd-attr-title {
+  flex: 1;
+  font-weight: 680;
+  font-size: 0.92em;
+  color: var(--hd-k, inherit);
+}
+h-card input.hd-attr-title,
+h-details input.hd-attr-title,
+h-step input.hd-attr-title {
+  font-size: 1em;
+  color: inherit;
+}
+select.hd-attr {
+  flex: none;
+  width: auto;
+  border: 1px solid var(--hd-line);
+  border-radius: 6px;
+  padding: 1px 4px;
+  font-size: 11px;
+  color: var(--hd-sub);
+  background: var(--hd-bg);
+}
+.hd-attr-cite {
+  flex: 1;
+  font-size: 0.82em;
+  font-weight: 650;
+}
+h-quote .hd-fields {
+  margin-top: 0.4em;
+  margin-bottom: 0;
+}
+h-stat .hd-fields {
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+h-stat input.hd-attr-value {
+  font-size: 1.7em;
+  font-weight: 760;
+  color: var(--hd-accent);
+  text-align: center;
+  line-height: 1.25;
+}
+h-stat input.hd-attr-label {
+  font-size: 0.82em;
+  color: var(--hd-sub);
+  text-align: center;
+}
+h-figure .hd-fields {
+  flex-direction: column;
+  gap: 2px;
+}
+.hd-attr-src {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.72em;
+  color: var(--hd-sub);
+  text-align: center;
+}
+.hd-attr-caption {
+  font-size: 0.85em;
+  color: var(--hd-sub);
+  text-align: center;
+}
+.hdoc-editor .hd-img-empty {
+  min-height: 90px;
+  width: 240px;
+  background: var(--hd-soft);
+  border: 1px dashed var(--hd-line);
+  border-radius: 8px;
+}
+.hdoc-editor h-toc {
+  min-height: 3em;
+}
+
+/* Ghost placeholders on the empty skeleton */
+.hdoc-editor .hd-ph::before {
+  content: attr(data-ph);
+  color: var(--hd-sub);
+  opacity: 0.45;
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+/* Slash insert menu (app chrome, follows the app theme) */
+.hd-slash {
+  position: fixed;
+  z-index: 60;
+  min-width: 220px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--color-card);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px -12px rgb(0 0 0 / 0.25);
+  padding: 5px;
+}
+.hd-slash-q {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--color-sub);
+}
+.hd-slash-item {
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--color-ink);
+  cursor: default;
+}
+.hd-slash-item.sel {
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  color: var(--color-primary);
+}
+
+/* Block drag handle in the left gutter */
+.hd-drag {
+  position: absolute;
+  z-index: 30;
+  width: 22px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--hd-sub);
+  font-size: 11px;
+  letter-spacing: -1.5px;
+  cursor: grab;
+}
+.hd-drag:hover {
+  background: var(--hd-soft);
+  color: var(--hd-ink);
+}
+.hd-drag:active {
+  cursor: grabbing;
+}

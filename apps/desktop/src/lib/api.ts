@@ -38,6 +38,11 @@ export const api = {
     invoke<boolean>("asset_checkpoint", { id, baseHash }),
   newMarkdown: (folder: string, name?: string) =>
     invoke<AssetMeta>("asset_new_markdown", { folder, name: name ?? null }),
+  newHdoc: (folder: string, name?: string) =>
+    invoke<AssetMeta>("asset_new_hdoc", { folder, name: name ?? null }),
+  /** Bake an hdoc into a standalone HTML file via a save dialog. */
+  exportHdocHtml: (id: string) =>
+    invoke<string | null>("export_hdoc_html", { id }),
   importPaths: (paths: string[], dest: string) =>
     invoke<ImportResult>("import_paths", { paths, dest }),
   pickAndImport: (dest: string) =>

@@ -2,8 +2,8 @@ use crate::error::Result;
 use crate::extract::Extracted;
 use crate::types::*;
 use crate::{
-    asset_kind, extract, file_stem, is_asset, is_hidden_component, markdown, now, parent_folder,
-    unique_name, AssetKind, Library,
+    asset_kind, extract, file_stem, hdoc, is_asset, is_hidden_component, markdown, now,
+    parent_folder, unique_name, AssetKind, Library,
 };
 use rusqlite::{params, OptionalExtension};
 use std::collections::HashSet;
@@ -15,6 +15,7 @@ use walkdir::WalkDir;
 fn extract_for(rel: &str, text: &str) -> Extracted {
     match asset_kind(Path::new(rel)) {
         Some(AssetKind::Markdown) => markdown::extract_md(text),
+        Some(AssetKind::Hdoc) => hdoc::extract_hdoc(text),
         _ => extract::extract_html(text),
     }
 }

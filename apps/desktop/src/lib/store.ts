@@ -115,6 +115,8 @@ interface S {
   closeViewer: () => void;
   setEditorHandle: (h: EditorHandle | null) => void;
   newMarkdown: (folder?: string) => Promise<void>;
+  newHdoc: (folder?: string) => Promise<void>;
+  doExportHdoc: (id: string) => Promise<void>;
   startEditAsset: (id: string) => void;
   startEditFolder: (rel: string) => void;
   stopEdit: () => void;
@@ -402,6 +404,30 @@ export const useStore = create<S>((set, get) => ({
       const a = await api.newMarkdown(dest);
       get().setFolder(a.folder);
       get().openViewer(a.id);
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+
+  // New page (.hdoc): same destination rule as New Markdown, opens in the editor
+  newHdoc: async (folder) => {
+    const st = get();
+    const dest =
+      folder ??
+      (st.folder.startsWith("#") || st.folder === INBOX ? "" : st.folder);
+    try {
+      const a = await api.newHdoc(dest);
+      get().setFolder(a.folder);
+      get().openViewer(a.id);
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+
+  doExportHdoc: async (id) => {
+    try {
+      const dest = await api.exportHdocHtml(id);
+      if (dest) get().showToast(tr("exportedTo", { dest }));
     } catch (e) {
       get().showToast(String(e));
     }

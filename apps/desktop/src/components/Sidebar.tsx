@@ -13,6 +13,7 @@ import {
   FolderPlus,
   Hash,
   Inbox,
+  LayoutTemplate,
   PencilLine,
   SquarePen,
   Tag as TagIcon,
@@ -23,7 +24,7 @@ import { api } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import { dragJustEnded, useStore } from "../lib/store";
 import type { TreeFile, TreeNode } from "../lib/types";
-import { INBOX, isMd, stemName } from "../lib/types";
+import { INBOX, isHdoc, isMd, stemName } from "../lib/types";
 import { dragStartHandler } from "../lib/drag";
 import { menuContentCls, MItem, MSep } from "./menu";
 import RenameInput from "./RenameInput";
@@ -280,6 +281,11 @@ function TreeRow(props: {
               onClick={() => st().newMarkdown(node.rel)}
             />
             <MItem
+              icon={<LayoutTemplate className="h-3.5 w-3.5" />}
+              label={t("newHdocCmd")}
+              onClick={() => st().newHdoc(node.rel)}
+            />
+            <MItem
               icon={<FolderPlus className="h-3.5 w-3.5" />}
               label={t("newSubfolder")}
               onClick={() =>
@@ -360,7 +366,11 @@ function FileRow(props: {
   const editing = useStore((s) => s.editingAsset === f.id);
   const t = makeT(useStore((s) => s.lang));
   const rel = folderRel ? `${folderRel}/${f.name}` : f.name;
-  const FileIcon = isMd(f.name) ? FileText : FileCode2;
+  const FileIcon = isMd(f.name)
+    ? FileText
+    : isHdoc(f.name)
+      ? LayoutTemplate
+      : FileCode2;
 
   const openIt = () => {
     if (dragJustEnded()) return;
@@ -418,7 +428,11 @@ function FileRow(props: {
           />
           <MItem
             icon={<ExternalLink className="h-3.5 w-3.5" />}
-            label={isMd(f.name) ? t("openWithDefaultApp") : t("openInBrowser")}
+            label={
+              isMd(f.name) || isHdoc(f.name)
+                ? t("openWithDefaultApp")
+                : t("openInBrowser")
+            }
             onClick={() => api.openInBrowser(f.id).catch(() => {})}
           />
           <MItem

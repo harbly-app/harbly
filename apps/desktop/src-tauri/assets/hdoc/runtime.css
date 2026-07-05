@@ -1,0 +1,457 @@
+/* Harbly hdoc runtime styles — the h-* vocabulary, v1.
+   Shared verbatim by the protocol renderer, baked HTML exports, and the in-app
+   editor (which mounts ProseMirror directly on an <h-doc> element), so the
+   editor is WYSIWYG by construction. Everything is driven by the --hd-* tokens;
+   a theme is just a token set selected by the h-doc[theme] attribute.
+   Compatibility floor is macOS 10.15 WKWebView: no :has(), no color-mix(),
+   no margin-inline. */
+
+h-doc,
+h-callout,
+h-columns,
+h-column,
+h-card,
+h-steps,
+h-step,
+h-figure,
+h-quote,
+h-stats,
+h-stat,
+h-details,
+h-toc {
+  display: block;
+}
+
+h-doc {
+  /* theme: paper (default) */
+  --hd-bg: #ffffff;
+  --hd-ink: #211f26;
+  --hd-sub: #6b6676;
+  --hd-line: #eceaf2;
+  --hd-soft: #f7f6fb;
+  --hd-accent: #6e56cf;
+  --hd-accent-soft: #f1edfb;
+  --hd-radius: 12px;
+  color-scheme: light;
+}
+h-doc[theme="sepia"] {
+  --hd-bg: #f8f2e6;
+  --hd-ink: #3c3427;
+  --hd-sub: #7d7161;
+  --hd-line: #e7dcc6;
+  --hd-soft: #f1e9d6;
+  --hd-accent: #a86a24;
+  --hd-accent-soft: #eee0c6;
+  color-scheme: light;
+}
+h-doc[theme="night"] {
+  --hd-bg: #161420;
+  --hd-ink: #e6e3ee;
+  --hd-sub: #a29daf;
+  --hd-line: #2e2a3c;
+  --hd-soft: #211e2e;
+  --hd-accent: #9d87e8;
+  --hd-accent-soft: #2a2440;
+  color-scheme: dark;
+}
+
+h-doc {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 52px 28px 88px;
+  background: var(--hd-bg);
+  color: var(--hd-ink);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC",
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+h-doc * {
+  box-sizing: border-box;
+}
+/* Reading column: every top-level block centers itself */
+h-doc > * {
+  max-width: 46rem;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ---------- typography (native whitelist) ---------- */
+h-doc h1,
+h-doc h2,
+h-doc h3 {
+  font-weight: 680;
+  line-height: 1.3;
+  margin-top: 1.8em;
+  margin-bottom: 0.6em;
+}
+h-doc > :first-child {
+  margin-top: 0;
+}
+h-doc h1 {
+  font-size: 1.9em;
+}
+h-doc h2 {
+  font-size: 1.5em;
+  padding-bottom: 0.24em;
+  border-bottom: 1px solid var(--hd-line);
+}
+h-doc h3 {
+  font-size: 1.24em;
+}
+h-doc p {
+  margin-top: 0;
+  margin-bottom: 1em;
+}
+h-doc a {
+  color: var(--hd-accent);
+  text-decoration: none;
+}
+h-doc a:hover {
+  text-decoration: underline;
+}
+h-doc ul,
+h-doc ol {
+  margin-top: 0;
+  margin-bottom: 1em;
+  padding-left: 1.6em;
+}
+h-doc li {
+  margin: 0.25em 0;
+}
+h-doc li > ul,
+h-doc li > ol {
+  margin: 0.25em 0;
+}
+h-doc blockquote {
+  margin: 0 auto 1em;
+  padding: 0.2em 1.1em;
+  border-left: 3px solid var(--hd-line);
+  color: var(--hd-sub);
+}
+h-doc blockquote > :last-child {
+  margin-bottom: 0;
+}
+h-doc code {
+  font-family: "SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88em;
+  background: var(--hd-soft);
+  padding: 0.16em 0.4em;
+  border-radius: 6px;
+}
+h-doc pre {
+  background: var(--hd-soft);
+  border: 1px solid var(--hd-line);
+  border-radius: var(--hd-radius);
+  padding: 16px 18px;
+  overflow-x: auto;
+  margin: 0 auto 1em;
+  line-height: 1.55;
+}
+h-doc pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.86em;
+}
+h-doc img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+h-doc hr {
+  border: none;
+  border-top: 1px solid var(--hd-line);
+  margin: 2em auto;
+}
+h-doc table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 auto 1em;
+  font-size: 0.95em;
+}
+h-doc th,
+h-doc td {
+  border: 1px solid var(--hd-line);
+  padding: 0.5em 0.8em;
+  text-align: left;
+}
+h-doc th {
+  background: var(--hd-soft);
+  font-weight: 640;
+}
+
+/* ---------- h-callout ---------- */
+h-callout {
+  --hd-k: var(--hd-accent);
+  border-left: 3px solid var(--hd-k);
+  background: var(--hd-soft);
+  border-radius: 0 var(--hd-radius) var(--hd-radius) 0;
+  padding: 14px 18px;
+  margin-bottom: 1.1em;
+}
+h-callout[kind="tip"] {
+  --hd-k: #2e9e5b;
+}
+h-callout[kind="warn"] {
+  --hd-k: #c7862d;
+}
+h-callout[kind="danger"] {
+  --hd-k: #d4544c;
+}
+h-callout::before {
+  content: attr(title);
+  display: block;
+  font-weight: 680;
+  font-size: 0.92em;
+  color: var(--hd-k);
+  margin-bottom: 0.35em;
+}
+h-callout:not([title])::before,
+h-callout[title=""]::before {
+  content: none;
+  margin: 0;
+}
+h-callout > :last-child {
+  margin-bottom: 0;
+}
+
+/* ---------- h-columns / h-column ---------- */
+h-columns {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 16px;
+  margin-bottom: 1.1em;
+}
+h-column {
+  min-width: 0;
+}
+h-column > :last-child {
+  margin-bottom: 0;
+}
+@media (max-width: 560px) {
+  h-columns {
+    grid-auto-flow: row;
+  }
+}
+
+/* ---------- h-card ---------- */
+h-card {
+  border: 1px solid var(--hd-line);
+  border-radius: var(--hd-radius);
+  background: var(--hd-soft);
+  padding: 16px 18px;
+  margin-bottom: 1.1em;
+}
+h-card::before {
+  content: attr(title);
+  display: block;
+  font-weight: 680;
+  margin-bottom: 0.4em;
+}
+h-card:not([title])::before,
+h-card[title=""]::before {
+  content: none;
+  margin: 0;
+}
+h-card > :last-child {
+  margin-bottom: 0;
+}
+h-column > h-card {
+  height: 100%;
+  margin-bottom: 0;
+}
+
+/* ---------- h-steps / h-step ---------- */
+h-steps {
+  counter-reset: hd-step;
+  margin-bottom: 1.4em;
+}
+h-step {
+  counter-increment: hd-step;
+  position: relative;
+  border-left: 2px solid var(--hd-line);
+  margin-left: 15px;
+  padding: 0 0 1.2em 28px;
+}
+h-step:last-child {
+  padding-bottom: 0.2em;
+}
+/* title rides ::before (block flow); the number chip is the absolutely
+   positioned ::after, so source order doesn't matter */
+h-step::before {
+  content: attr(title);
+  display: block;
+  font-weight: 680;
+  margin-bottom: 0.3em;
+}
+h-step:not([title])::before,
+h-step[title=""]::before {
+  content: none;
+  margin: 0;
+}
+h-step::after {
+  content: counter(hd-step);
+  position: absolute;
+  left: -16px;
+  top: -1px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--hd-accent-soft);
+  color: var(--hd-accent);
+  font-weight: 700;
+  font-size: 0.85em;
+  line-height: 30px;
+  text-align: center;
+}
+h-step > :last-child {
+  margin-bottom: 0;
+}
+
+/* ---------- h-figure ---------- */
+h-figure {
+  margin-bottom: 1.2em;
+  text-align: center;
+}
+h-figure::after {
+  content: attr(caption);
+  display: block;
+  font-size: 0.85em;
+  color: var(--hd-sub);
+  margin-top: 0.5em;
+}
+h-figure:not([caption])::after,
+h-figure[caption=""]::after {
+  content: none;
+  margin: 0;
+}
+
+/* ---------- h-quote ---------- */
+h-quote {
+  border-left: 3px solid var(--hd-accent);
+  padding: 0.2em 1.2em;
+  color: var(--hd-sub);
+  font-size: 1.06em;
+  margin-bottom: 1.2em;
+}
+h-quote > :last-child {
+  margin-bottom: 0;
+}
+h-quote::after {
+  content: "— " attr(cite);
+  display: block;
+  margin-top: 0.4em;
+  font-size: 0.82em;
+  font-weight: 650;
+  color: var(--hd-ink);
+}
+h-quote:not([cite])::after,
+h-quote[cite=""]::after {
+  content: none;
+  margin: 0;
+}
+
+/* ---------- h-stats / h-stat ---------- */
+h-stats {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 14px;
+  margin-bottom: 1.2em;
+}
+h-stat {
+  border: 1px solid var(--hd-line);
+  border-radius: var(--hd-radius);
+  padding: 14px 16px;
+  text-align: center;
+}
+h-stat::before {
+  content: attr(value);
+  display: block;
+  font-size: 1.7em;
+  font-weight: 760;
+  color: var(--hd-accent);
+  line-height: 1.25;
+}
+h-stat::after {
+  content: attr(label);
+  display: block;
+  font-size: 0.82em;
+  color: var(--hd-sub);
+  margin-top: 0.2em;
+}
+@media (max-width: 560px) {
+  h-stats {
+    grid-auto-flow: row;
+  }
+}
+
+/* ---------- h-details ---------- */
+h-details {
+  border: 1px solid var(--hd-line);
+  border-radius: var(--hd-radius);
+  margin-bottom: 1.1em;
+  padding: 0 16px;
+}
+h-details > .hd-summary {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  font-weight: 650;
+  padding: 12px 0;
+  cursor: pointer;
+}
+h-details > .hd-summary::before {
+  content: "▸  ";
+  color: var(--hd-sub);
+}
+h-details[open] > .hd-summary::before {
+  content: "▾  ";
+}
+/* collapsed: only the summary button is visible (the runtime always
+   materializes one, and the editor keeps sections expanded) */
+h-details:not([open]) > :not(.hd-summary) {
+  display: none;
+}
+h-details[open] {
+  padding-bottom: 12px;
+}
+h-details > :last-child {
+  margin-bottom: 0;
+}
+
+/* ---------- h-toc ---------- */
+h-toc {
+  border: 1px solid var(--hd-line);
+  border-radius: var(--hd-radius);
+  background: var(--hd-soft);
+  padding: 14px 18px;
+  margin-bottom: 1.4em;
+  font-size: 0.92em;
+}
+h-toc::before {
+  content: attr(data-label);
+  display: block;
+  font-weight: 680;
+  margin-bottom: 0.3em;
+}
+h-toc .hd-toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+h-toc .hd-toc-list li {
+  margin: 0.15em 0;
+}
+h-toc .hd-toc-h2 {
+  padding-left: 1.1em;
+}
+h-toc .hd-toc-h3 {
+  padding-left: 2.2em;
+}

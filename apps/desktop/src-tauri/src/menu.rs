@@ -41,6 +41,11 @@ pub fn setup(app: &AppHandle, lang: &str) -> tauri::Result<()> {
                 .build(app)?,
         )
         .item(
+            &MenuItemBuilder::with_id("new-hdoc", t.new_hdoc)
+                .accelerator("CmdOrCtrl+Alt+N")
+                .build(app)?,
+        )
+        .item(
             &MenuItemBuilder::with_id("import", t.import_html)
                 .accelerator("CmdOrCtrl+O")
                 .build(app)?,

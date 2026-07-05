@@ -21,6 +21,7 @@ pub struct L {
     // File
     pub menu_file: &'static str,
     pub new_md: &'static str,
+    pub new_hdoc: &'static str,
     pub import_html: &'static str,
     pub new_folder: &'static str,
     pub trash: &'static str,
@@ -61,8 +62,10 @@ pub struct L {
     pub op_import_n: &'static str,
     pub op_paste_n: &'static str,
     pub op_new_md: &'static str,
-    // Default name for a newly created Markdown file
+    // Default name for a newly created Markdown/page file
     pub untitled: &'static str,
+    // Label of the generated table of contents inside rendered hdoc pages
+    pub toc: &'static str,
     // About
     pub about_comment: &'static str,
 }
@@ -75,6 +78,7 @@ static ZH_CN: L = L {
     settings: "设置…",
     menu_file: "文件",
     new_md: "新建 Markdown",
+    new_hdoc: "新建页面",
     import_html: "导入文件…",
     new_folder: "新建文件夹",
     trash: "移入废纸篓",
@@ -111,6 +115,7 @@ static ZH_CN: L = L {
     op_paste_n: "粘贴 {} 项",
     op_new_md: "新建“{}”",
     untitled: "未命名",
+    toc: "目录",
     about_comment: "本地优先的 HTML 资产管理器",
 };
 
@@ -118,6 +123,7 @@ static ZH_TW: L = L {
     settings: "設定…",
     menu_file: "檔案",
     new_md: "新增 Markdown",
+    new_hdoc: "新增頁面",
     import_html: "讀入檔案…",
     new_folder: "新增檔案夾",
     trash: "丟到垃圾桶",
@@ -154,6 +160,7 @@ static ZH_TW: L = L {
     op_paste_n: "貼上 {} 個項目",
     op_new_md: "新增「{}」",
     untitled: "未命名",
+    toc: "目錄",
     about_comment: "本地優先的 HTML 資產管理工具",
 };
 
@@ -161,6 +168,7 @@ static EN: L = L {
     settings: "Settings…",
     menu_file: "File",
     new_md: "New Markdown",
+    new_hdoc: "New Page",
     import_html: "Import Files…",
     new_folder: "New Folder",
     trash: "Move to Trash",
@@ -197,6 +205,7 @@ static EN: L = L {
     op_paste_n: "Paste {} Items",
     op_new_md: "New “{}”",
     untitled: "Untitled",
+    toc: "Contents",
     about_comment: "Local-first HTML asset manager",
 };
 
@@ -204,6 +213,7 @@ static JA: L = L {
     settings: "設定…",
     menu_file: "ファイル",
     new_md: "新規 Markdown",
+    new_hdoc: "新規ページ",
     import_html: "ファイルを読み込む…",
     new_folder: "新規フォルダ",
     trash: "ゴミ箱に入れる",
@@ -240,6 +250,7 @@ static JA: L = L {
     op_paste_n: "{} 項目のペースト",
     op_new_md: "「{}」の作成",
     untitled: "無題",
+    toc: "目次",
     about_comment: "ローカルファーストの HTML アセット管理",
 };
 
@@ -247,6 +258,7 @@ static KO: L = L {
     settings: "설정…",
     menu_file: "파일",
     new_md: "새로운 Markdown",
+    new_hdoc: "새로운 페이지",
     import_html: "파일 가져오기…",
     new_folder: "새로운 폴더",
     trash: "휴지통으로 이동",
@@ -283,6 +295,7 @@ static KO: L = L {
     op_paste_n: "{}개 항목 붙여넣기",
     op_new_md: "‘{}’ 생성",
     untitled: "제목 없음",
+    toc: "목차",
     about_comment: "로컬 우선 HTML 에셋 관리자",
 };
 
@@ -290,6 +303,7 @@ static ES: L = L {
     settings: "Ajustes…",
     menu_file: "Archivo",
     new_md: "Nuevo Markdown",
+    new_hdoc: "Nueva página",
     import_html: "Importar archivos…",
     new_folder: "Nueva carpeta",
     trash: "Trasladar a la papelera",
@@ -326,6 +340,7 @@ static ES: L = L {
     op_paste_n: "Pegar {} ítems",
     op_new_md: "Nuevo «{}»",
     untitled: "Sin título",
+    toc: "Índice",
     about_comment: "Gestor local-first de recursos HTML",
 };
 

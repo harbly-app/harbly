@@ -2,6 +2,7 @@ mod ai_meta;
 mod db;
 mod error;
 mod extract;
+mod hdoc;
 mod markdown;
 mod ops;
 mod scan;
@@ -14,6 +15,7 @@ pub use ai_meta::{
     AI_VERSION_LABEL,
 };
 pub use error::{HarblyError, Result};
+pub use hdoc::{HDOC_NEW_TEMPLATE, HDOC_VOCAB_VERSION};
 pub use markdown::md_to_html_body;
 pub use ops::copy_dir_recursive;
 pub use tags_xattr::{copy_tags, read_tags as read_file_tags, write_tags as write_file_tags};
@@ -135,6 +137,8 @@ pub(crate) fn mtime_secs(md: &std::fs::Metadata) -> i64 {
 pub(crate) enum AssetKind {
     Html,
     Markdown,
+    /// Harbly page document: constrained custom-element HTML (see hdoc.rs).
+    Hdoc,
 }
 
 /// Classify a path by extension; `None` for anything the library doesn't manage.
@@ -147,12 +151,13 @@ pub(crate) fn asset_kind(p: &Path) -> Option<AssetKind> {
     {
         Some("html") | Some("htm") => Some(AssetKind::Html),
         Some("md") | Some("markdown") => Some(AssetKind::Markdown),
+        Some("hdoc") => Some(AssetKind::Hdoc),
         _ => None,
     }
 }
 
-/// Whether a path is a library-managed asset (HTML or Markdown). Gates the
-/// scanner and importer.
+/// Whether a path is a library-managed asset (HTML, Markdown or hdoc). Gates
+/// the scanner and importer.
 pub(crate) fn is_asset(p: &Path) -> bool {
     asset_kind(p).is_some()
 }
