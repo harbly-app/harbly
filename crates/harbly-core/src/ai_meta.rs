@@ -117,6 +117,36 @@ pub struct AiSessionSnapshot {
     pub run_links: Vec<(String, Option<String>)>,
 }
 
+const SESSION_COLS: &str =
+    "id, title, supply, model, effort, agent_session_id, created_at, updated_at";
+
+fn row_to_session(r: &rusqlite::Row) -> rusqlite::Result<AiSession> {
+    Ok(AiSession {
+        id: r.get(0)?,
+        title: r.get(1)?,
+        supply: r.get(2)?,
+        model: r.get(3)?,
+        effort: r.get(4)?,
+        agent_session_id: r.get(5)?,
+        created_at: r.get(6)?,
+        updated_at: r.get(7)?,
+    })
+}
+
+const MSG_COLS: &str = "id, session_id, role, content, actions, created_at";
+
+fn row_to_message(r: &rusqlite::Row) -> rusqlite::Result<AiMessage> {
+    let actions_json: String = r.get(4)?;
+    Ok(AiMessage {
+        id: r.get(0)?,
+        session_id: r.get(1)?,
+        role: r.get(2)?,
+        content: r.get(3)?,
+        actions: serde_json::from_str(&actions_json).unwrap_or_default(),
+        created_at: r.get(5)?,
+    })
+}
+
 const RUN_COLS: &str =
     "id, asset_id, kind, supply, model, instruction, status, ver, report, error, session_id, message_id, created_at";
 
@@ -146,11 +176,22 @@ impl Library {
     /// safety net (rollback-grade undo), matching the product's undo-over-
     /// confirm rule. Returns the version number the content landed as.
     pub fn apply_ai_output(&self, id: &str, text: &str, label: &str) -> Result<i64> {
+        // The live file may hold content NO version has captured — the editor
+        // autosaves without versioning until its session-end checkpoint.
+        // Snapshot it first, or the overwrite below would destroy the only
+        // copy of the user's edits. write_version's dedup makes this a no-op
+        // whenever the live content already equals the newest snapshot.
+        if let Ok(abs) = self.asset_abs_path(id) {
+            if let Ok(live) = std::fs::read(&abs) {
+                let live_hash = blake3::hash(&live).to_hex().to_string();
+                self.write_version(id, &live, &live_hash, "编辑")?;
+            }
+        }
         let content = text.as_bytes();
         let hash = blake3::hash(content).to_hex().to_string();
-        // Snapshot BEFORE mutating the live file: if the second step fails,
-        // the worst leftover is an unapplied version — never a changed file
-        // without its safety-net snapshot.
+        // Snapshot the NEW content before mutating the live file too: if the
+        // write fails, the worst leftover is an unapplied version — never a
+        // changed file without its safety-net snapshot.
         let ver = self.write_version(id, content, &hash, label)?;
         self.write_asset_text(id, text)?;
         Ok(ver)
@@ -427,21 +468,9 @@ impl Library {
         let db = self.db.lock().unwrap();
         Ok(db
             .query_row(
-                "SELECT id, title, supply, model, effort, agent_session_id, created_at, updated_at
-                 FROM ai_sessions WHERE id=?1",
+                &format!("SELECT {SESSION_COLS} FROM ai_sessions WHERE id=?1"),
                 [id],
-                |r| {
-                    Ok(AiSession {
-                        id: r.get(0)?,
-                        title: r.get(1)?,
-                        supply: r.get(2)?,
-                        model: r.get(3)?,
-                        effort: r.get(4)?,
-                        agent_session_id: r.get(5)?,
-                        created_at: r.get(6)?,
-                        updated_at: r.get(7)?,
-                    })
-                },
+                row_to_session,
             )
             .optional()?)
     }
@@ -449,23 +478,11 @@ impl Library {
     /// Newest activity first.
     pub fn list_ai_sessions(&self, limit: i64) -> Result<Vec<AiSession>> {
         let db = self.db.lock().unwrap();
-        let mut stmt = db.prepare(
-            "SELECT id, title, supply, model, effort, agent_session_id, created_at, updated_at
-             FROM ai_sessions ORDER BY updated_at DESC, rowid DESC LIMIT ?1",
-        )?;
+        let mut stmt = db.prepare(&format!(
+            "SELECT {SESSION_COLS} FROM ai_sessions ORDER BY updated_at DESC, rowid DESC LIMIT ?1"
+        ))?;
         let rows = stmt
-            .query_map([limit], |r| {
-                Ok(AiSession {
-                    id: r.get(0)?,
-                    title: r.get(1)?,
-                    supply: r.get(2)?,
-                    model: r.get(3)?,
-                    effort: r.get(4)?,
-                    agent_session_id: r.get(5)?,
-                    created_at: r.get(6)?,
-                    updated_at: r.get(7)?,
-                })
-            })?
+            .query_map([limit], row_to_session)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -518,20 +535,37 @@ impl Library {
     /// lose the back-link (session_id nulled) but stay on the file timeline.
     /// Returns None when the session does not exist.
     pub fn delete_ai_session(&self, id: &str) -> Result<Option<AiSessionSnapshot>> {
-        let Some(session) = self.get_ai_session(id)? else {
+        let db = self.db.lock().unwrap();
+        // Snapshot and delete inside ONE transaction: with a separate read, a
+        // message landing in the gap would be deleted yet missing from the
+        // undo snapshot — destroyed with no way back.
+        let tx = db.unchecked_transaction()?;
+        let session = tx
+            .query_row(
+                &format!("SELECT {SESSION_COLS} FROM ai_sessions WHERE id=?1"),
+                [id],
+                row_to_session,
+            )
+            .optional()?;
+        let Some(session) = session else {
             return Ok(None);
         };
-        let messages = self.list_ai_messages(id)?;
-        let db = self.db.lock().unwrap();
+        let messages = {
+            let mut stmt = tx.prepare(&format!(
+                "SELECT {MSG_COLS} FROM ai_messages WHERE session_id=?1 ORDER BY created_at ASC, rowid ASC"
+            ))?;
+            let rows = stmt
+                .query_map([id], row_to_message)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
         let run_links: Vec<(String, Option<String>)> = {
-            let mut stmt = db.prepare("SELECT id, message_id FROM ai_runs WHERE session_id=?1")?;
+            let mut stmt = tx.prepare("SELECT id, message_id FROM ai_runs WHERE session_id=?1")?;
             let rows = stmt
                 .query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         };
-        // One transaction: a crash cannot leave the session half-deleted
-        let tx = db.unchecked_transaction()?;
         tx.execute("DELETE FROM ai_sessions WHERE id=?1", [id])?;
         tx.execute("DELETE FROM ai_messages WHERE session_id=?1", [id])?;
         tx.execute(
@@ -553,8 +587,7 @@ impl Library {
         let tx = db.unchecked_transaction()?;
         let s = &snap.session;
         tx.execute(
-            "INSERT OR REPLACE INTO ai_sessions(id, title, supply, model, effort, agent_session_id, created_at, updated_at)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            &format!("INSERT OR REPLACE INTO ai_sessions({SESSION_COLS}) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)"),
             params![
                 s.id,
                 s.title,
@@ -569,9 +602,17 @@ impl Library {
         for m in &snap.messages {
             let actions_json = serde_json::to_string(&m.actions).unwrap_or_else(|_| "[]".into());
             tx.execute(
-                "INSERT OR REPLACE INTO ai_messages(id, session_id, role, content, actions, created_at)
-                 VALUES(?1,?2,?3,?4,?5,?6)",
-                params![m.id, m.session_id, m.role, m.content, actions_json, m.created_at],
+                &format!(
+                    "INSERT OR REPLACE INTO ai_messages({MSG_COLS}) VALUES(?1,?2,?3,?4,?5,?6)"
+                ),
+                params![
+                    m.id,
+                    m.session_id,
+                    m.role,
+                    m.content,
+                    actions_json,
+                    m.created_at
+                ],
             )?;
         }
         for (run_id, message_id) in &snap.run_links {
@@ -628,22 +669,11 @@ impl Library {
     /// Oldest first — ready to render (or to replay as BYOK context).
     pub fn list_ai_messages(&self, session_id: &str) -> Result<Vec<AiMessage>> {
         let db = self.db.lock().unwrap();
-        let mut stmt = db.prepare(
-            "SELECT id, session_id, role, content, actions, created_at
-             FROM ai_messages WHERE session_id=?1 ORDER BY created_at ASC, rowid ASC",
-        )?;
+        let mut stmt = db.prepare(&format!(
+            "SELECT {MSG_COLS} FROM ai_messages WHERE session_id=?1 ORDER BY created_at ASC, rowid ASC"
+        ))?;
         let rows = stmt
-            .query_map([session_id], |r| {
-                let actions_json: String = r.get(4)?;
-                Ok(AiMessage {
-                    id: r.get(0)?,
-                    session_id: r.get(1)?,
-                    role: r.get(2)?,
-                    content: r.get(3)?,
-                    actions: serde_json::from_str(&actions_json).unwrap_or_default(),
-                    created_at: r.get(5)?,
-                })
-            })?
+            .query_map([session_id], row_to_message)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }

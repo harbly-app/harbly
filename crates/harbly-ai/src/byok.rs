@@ -90,8 +90,16 @@ pub(crate) async fn run_turn(
                 step += 1;
                 let (blocks, stop_reason, text) = asm.into_anthropic();
                 last_stop = stop_reason.clone();
-                if !text.is_empty() {
-                    reply = text;
+                // Append, don't replace: a tool turn narrates across several
+                // steps and ALL of it already streamed to the UI — keeping
+                // only the last step would make the earlier prose vanish at
+                // swap time and drop it from replayed history.
+                let had_text = !text.is_empty();
+                if had_text {
+                    if !reply.is_empty() {
+                        reply.push_str("\n\n");
+                    }
+                    reply.push_str(&text);
                 }
                 let tool_uses: Vec<Value> = blocks
                     .iter()
@@ -104,6 +112,13 @@ pub(crate) async fn run_turn(
                 if step == MAX_STEPS {
                     steps_exhausted = true;
                     break;
+                }
+                if had_text {
+                    // Keep the live view in lockstep with the persisted reply:
+                    // the next step's prose starts a new paragraph there too.
+                    on_event(AiEvent::Delta {
+                        text: "\n\n".into(),
+                    });
                 }
                 // The API rejects empty text blocks on replay (a text block
                 // can open and close with zero deltas ahead of tool_use).
@@ -157,8 +172,13 @@ pub(crate) async fn run_turn(
                 step += 1;
                 let (text, calls, finish, reasoning) = asm.into_openai();
                 last_stop = finish.clone();
-                if !text.is_empty() {
-                    reply = text.clone();
+                // Same append semantics as the Anthropic branch above.
+                let had_text = !text.is_empty();
+                if had_text {
+                    if !reply.is_empty() {
+                        reply.push_str("\n\n");
+                    }
+                    reply.push_str(&text);
                 }
                 if finish.as_deref() != Some("tool_calls") || calls.is_empty() {
                     break;
@@ -166,6 +186,11 @@ pub(crate) async fn run_turn(
                 if step == MAX_STEPS {
                     steps_exhausted = true;
                     break;
+                }
+                if had_text {
+                    on_event(AiEvent::Delta {
+                        text: "\n\n".into(),
+                    });
                 }
                 let tool_calls: Vec<Value> = calls
                     .iter()

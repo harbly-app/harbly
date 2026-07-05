@@ -120,6 +120,9 @@ pub fn activate_library(app: &AppHandle, root: PathBuf) -> Result<String, String
     // Invalidate the old library's undo log (its paths no longer belong to the current library)
     state.undo_stack.lock().unwrap().clear();
     state.redo_stack.lock().unwrap().clear();
+    // Same for the AI-session undo slot: restoring it would write the OLD
+    // library's transcript into the new library's database
+    *state.ai_deleted_session.lock().unwrap() = None;
     sync_undo_menu(app);
 
     save_library(app, lib.root());

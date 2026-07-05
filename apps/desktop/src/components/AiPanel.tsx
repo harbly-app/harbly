@@ -132,6 +132,10 @@ export default function AiPanel() {
   // WKWebView delivers the composition-confirming Enter AFTER compositionend
   // with isComposing already false — remember when composition last ended
   const composeEndAt = useRef(0);
+  // Session id whose transcript load should be skipped once: the draft-send
+  // path selects the just-created session, and the effect's fetch would race
+  // the backend's user-row append and blank the optimistic bubble
+  const skipLoadRef = useRef<string | null>(null);
   // Autoscroll only while the user is already at the bottom
   const stickRef = useRef(true);
 
@@ -234,6 +238,10 @@ export default function AiPanel() {
   }, [sessionKey]);
 
   useEffect(() => {
+    if (skipLoadRef.current === activeId) {
+      skipLoadRef.current = null;
+      return;
+    }
     void loadMessages(activeId);
   }, [loadMessages, activeId]);
 
@@ -364,6 +372,7 @@ export default function AiPanel() {
           );
           setSessions((list) => [s, ...list]);
           sessionId = s.id;
+          skipLoadRef.current = s.id;
           switchSession(s.id);
         }
       } catch (e) {

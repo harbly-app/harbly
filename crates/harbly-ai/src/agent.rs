@@ -163,20 +163,23 @@ pub(crate) async fn run_claude_turn(
     let (program, model, workdir, mcp_config) = agent_fields(supply);
     std::fs::create_dir_all(workdir)?;
 
-    // The MCP config goes through a temp file: robust across CLI versions
+    // The MCP config is REQUIRED: the tool sandbox (allowed/disallowed lists
+    // below) is what confines a headless run to the library, and it only
+    // makes sense alongside the harbly server. Running without it would fall
+    // back to the user's global permission rules — the raw file/exec leak
+    // this mode was built to prevent.
+    let Some(mcp_json) = mcp_config else {
+        return Err(AiError::Agent("missing MCP config for claude".into()));
+    };
+    // The config goes through a temp file: robust across CLI versions
     // (inline-JSON support varies) and keeps the command line short.
     let mut config_file = tempfile::Builder::new()
         .prefix("harbly-mcp-")
         .suffix(".json")
         .tempfile()?;
-    let config_path = match mcp_config {
-        Some(json) => {
-            config_file.write_all(json.as_bytes())?;
-            config_file.flush()?;
-            Some(config_file.path().to_path_buf())
-        }
-        None => None,
-    };
+    config_file.write_all(mcp_json.as_bytes())?;
+    config_file.flush()?;
+    let config_path = config_file.path().to_path_buf();
 
     // With a resume id claude carries its own context; otherwise replay a
     // compact transcript so a fresh CLI session still knows the conversation.
@@ -192,21 +195,19 @@ pub(crate) async fn run_claude_turn(
         .args(["--output-format", "stream-json", "--verbose"])
         .args(["--max-turns", "40"])
         .args(["--append-system-prompt", &system_prompt(task)]);
-    if let Some(cfg) = &config_path {
-        cmd.arg("--mcp-config").arg(cfg);
-        // Pre-approve ONLY the Harbly tools (both server- and tool-level
-        // patterns, for CLI-version tolerance)...
-        cmd.args(["--allowedTools", "mcp__harbly,mcp__harbly__*"]);
-        // ...and explicitly forbid raw file/exec access: the user's own
-        // global Claude Code permission rules would otherwise leak into this
-        // headless run (observed: Bash find escaping the library). Web and
-        // subagent tools are closed too — a library-only run has no business
-        // browsing, and Task would launder the other bans through a subagent.
-        cmd.args([
-            "--disallowedTools",
-            "Bash,Read,Edit,Write,MultiEdit,NotebookEdit,Glob,Grep,WebFetch,WebSearch,Task",
-        ]);
-    }
+    cmd.arg("--mcp-config").arg(&config_path);
+    // Pre-approve ONLY the Harbly tools (both server- and tool-level
+    // patterns, for CLI-version tolerance)...
+    cmd.args(["--allowedTools", "mcp__harbly,mcp__harbly__*"]);
+    // ...and explicitly forbid raw file/exec access: the user's own
+    // global Claude Code permission rules would otherwise leak into this
+    // headless run (observed: Bash find escaping the library). Web and
+    // subagent tools are closed too — a library-only run has no business
+    // browsing, and Task would launder the other bans through a subagent.
+    cmd.args([
+        "--disallowedTools",
+        "Bash,Read,Edit,Write,MultiEdit,NotebookEdit,Glob,Grep,WebFetch,WebSearch,Task",
+    ]);
     if let Some(id) = resume {
         cmd.args(["--resume", id]);
     }
@@ -497,12 +498,27 @@ impl StreamParser {
                 if v["subtype"] == "success" {
                     self.final_text = v["result"].as_str().map(String::from);
                 } else if let Some(sub) = v["subtype"].as_str() {
-                    self.error = Some(
-                        v["result"]
-                            .as_str()
-                            .map(String::from)
-                            .unwrap_or_else(|| sub.to_string()),
-                    );
+                    // The CLI splits detail across fields: `result` (string,
+                    // sometimes absent) and an `errors` array — e.g. a stale
+                    // --resume id reports subtype "error_during_execution"
+                    // with the actual "No conversation found …" only inside
+                    // `errors`. Fold everything in so callers can match on it.
+                    let mut msg = v["result"].as_str().unwrap_or(sub).to_string();
+                    if let Some(errs) = v["errors"].as_array() {
+                        let details: Vec<String> = errs
+                            .iter()
+                            .map(|e| {
+                                e.as_str()
+                                    .map(String::from)
+                                    .unwrap_or_else(|| e.to_string())
+                            })
+                            .collect();
+                        if !details.is_empty() {
+                            msg.push_str(": ");
+                            msg.push_str(&details.join("; "));
+                        }
+                    }
+                    self.error = Some(msg);
                 }
             }
             _ => {}
@@ -547,7 +563,10 @@ impl StreamParser {
                     }
                 }
                 "command_execution" => {
-                    if v["type"] == "item.started" || v["type"] == "item.completed" {
+                    // started only — completed repeats the same item, and the
+                    // persisted transcript would show every command twice
+                    // (mirrors the legacy schema's exec_command_begin).
+                    if v["type"] == "item.started" {
                         out.push(AiEvent::Action {
                             label: command_label(&item["command"]),
                         });
@@ -633,6 +652,31 @@ mod tests {
         let mut p = StreamParser::new(AgentKind::ClaudeCode);
         p.feed(r#"{"type":"result","subtype":"error_max_turns"}"#);
         assert_eq!(p.error.as_deref(), Some("error_max_turns"));
+
+        // The CLI hides detail in the `errors` array (observed on a stale
+        // --resume id) — it must reach the error text callers match on
+        let mut p = StreamParser::new(AgentKind::ClaudeCode);
+        p.feed(
+            r#"{"type":"result","subtype":"error_during_execution","errors":["No conversation found with session ID: abc"]}"#,
+        );
+        let err = p.error.as_deref().unwrap();
+        assert!(err.contains("error_during_execution"));
+        assert!(err.contains("No conversation found"));
+    }
+
+    #[test]
+    fn codex_item_schema_emits_one_action_per_command() {
+        let mut p = StreamParser::new(AgentKind::Codex);
+        let started = p.feed(
+            r#"{"type":"item.started","item":{"type":"command_execution","command":"ls -la"}}"#,
+        );
+        assert_eq!(started.len(), 1);
+        // completed repeats the same item — persisting it would show every
+        // command twice in the reloaded transcript
+        let completed = p.feed(
+            r#"{"type":"item.completed","item":{"type":"command_execution","command":"ls -la"}}"#,
+        );
+        assert!(completed.is_empty());
     }
 
     #[test]

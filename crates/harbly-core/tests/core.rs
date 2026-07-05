@@ -489,6 +489,42 @@ fn ai_apply_output_appends_version_and_reindexes() {
 }
 
 #[test]
+fn ai_write_snapshots_unversioned_live_edits_first() {
+    let (_tmp, lib) = setup();
+    fs::write(lib.root().join("note.html"), html("Note", "第一版")).unwrap();
+    lib.scan(|_| {}).unwrap();
+    let a = lib.asset_by_rel("note.html").unwrap();
+
+    // Editor autosave: live file changes with NO version captured
+    lib.write_asset_text(&a.id, &html("Note", "用户手打的心血内容"))
+        .unwrap();
+    assert_eq!(lib.asset(&a.id).unwrap().ver_count, 1);
+
+    // An AI write must not destroy the only copy of those edits: the live
+    // content is checkpointed (编辑) before the AI version lands
+    let ver = lib
+        .apply_ai_output(&a.id, &html("Note", "AI 重写后的内容"), "AI 改版")
+        .unwrap();
+    assert_eq!(ver, 3);
+    let versions = lib.list_versions(&a.id).unwrap();
+    assert_eq!(versions[0].label, "AI 改版");
+    assert_eq!(versions[1].label, "编辑");
+    let saved = fs::read_to_string(lib.version_file_path(&a.id, 2)).unwrap();
+    assert!(saved.contains("用户手打的心血内容"));
+
+    // Even a byte-identical AI re-emission of an OLD version cannot clobber
+    // newer live edits: the pre-snapshot bumps the chain first
+    lib.write_asset_text(&a.id, &html("Note", "又一轮未存档编辑"))
+        .unwrap();
+    let ver = lib
+        .apply_ai_output(&a.id, &html("Note", "AI 重写后的内容"), "AI 改版")
+        .unwrap();
+    assert_eq!(ver, 5);
+    let recovered = fs::read_to_string(lib.version_file_path(&a.id, 4)).unwrap();
+    assert!(recovered.contains("又一轮未存档编辑"));
+}
+
+#[test]
 fn ai_runs_record_list_and_cleanup() {
     let (_tmp, lib) = setup();
     let root = lib.root().to_path_buf();

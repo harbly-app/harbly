@@ -52,14 +52,22 @@ fn read_key(provider: &str) -> Option<String> {
 // ---------- Configuration & credentials ----------
 
 /// Detect installed agent CLIs (claude / codex). Runs `--version` with a short
-/// cap, so it is safe to call every time the panel or settings open.
+/// cap, so it is safe to call every time the panel or settings open. The
+/// results refresh the send-path cache in [`AppState::agent_cache`].
 #[tauri::command]
-pub async fn ai_detect_agents() -> Vec<AgentInfo> {
+pub async fn ai_detect_agents(app: AppHandle) -> Vec<AgentInfo> {
     let (claude, codex) = tokio::join!(
         harbly_ai::detect_agent(AgentKind::ClaudeCode),
         harbly_ai::detect_agent(AgentKind::Codex),
     );
-    [claude, codex].into_iter().flatten().collect()
+    let found: Vec<AgentInfo> = [claude, codex].into_iter().flatten().collect();
+    let state = app.state::<AppState>();
+    let mut cache = state.agent_cache.lock().unwrap();
+    cache.clear();
+    for info in &found {
+        cache.insert(info.kind.clone(), info.clone());
+    }
+    found
 }
 
 #[tauri::command]
@@ -127,6 +135,29 @@ pub async fn ai_session_create(
 /// follow the product's undo-over-confirm rule like file deletion does.
 #[tauri::command]
 pub async fn ai_session_delete(app: AppHandle, id: String) -> Result<(), String> {
+    // A streaming turn holds this transcript open: cancel it and wait for the
+    // busy mark to clear, so the snapshot below is complete and nothing
+    // appends to (or records runs against) a session that no longer exists.
+    let flag = {
+        let state = app.state::<AppState>();
+        let busy = state.ai_busy.lock().unwrap();
+        busy.get(&id).cloned()
+    };
+    if let Some(flag) = flag {
+        flag.cancel();
+        let mut cleared = false;
+        for _ in 0..20 {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            let state = app.state::<AppState>();
+            if !state.ai_busy.lock().unwrap().contains_key(&id) {
+                cleared = true;
+                break;
+            }
+        }
+        if !cleared {
+            return Err("该会话已有正在进行的回合".to_string());
+        }
+    }
     let state = app.state::<AppState>();
     let snap = state
         .lib()?
@@ -145,11 +176,20 @@ pub async fn ai_session_restore(app: AppHandle) -> Result<Option<String>, String
     let state = app.state::<AppState>();
     let snap = state.ai_deleted_session.lock().unwrap().take();
     let Some(snap) = snap else { return Ok(None) };
-    state
-        .lib()?
-        .restore_ai_session(&snap)
-        .map_err(|e| e.to_string())?;
-    Ok(Some(snap.session.id))
+    let restored_id = snap.session.id.clone();
+    let outcome = state
+        .lib()
+        .and_then(|lib| lib.restore_ai_session(&snap).map_err(|e| e.to_string()));
+    if let Err(e) = outcome {
+        // Keep Undo retryable: put the snapshot back — unless a newer
+        // deletion claimed the slot while we were failing.
+        let mut slot = state.ai_deleted_session.lock().unwrap();
+        if slot.is_none() {
+            *slot = Some(snap);
+        }
+        return Err(e);
+    }
+    Ok(Some(restored_id))
 }
 
 #[tauri::command]
@@ -279,11 +319,36 @@ fn mcp_server_path() -> Result<std::path::PathBuf, String> {
     }
 }
 
-async fn resolve_supply(lib: &Library, session: &harbly_core::AiSession) -> Result<Supply, String> {
+async fn resolve_supply(
+    app: &AppHandle,
+    lib: &Library,
+    session: &harbly_core::AiSession,
+) -> Result<Supply, String> {
     if let Some(kind) = AgentKind::from_id(&session.supply) {
-        let info = harbly_ai::detect_agent(kind)
-            .await
-            .ok_or_else(|| "未找到本地 agent".to_string())?;
+        // Cache-first: a fresh detect_agent spawns `--version` (hundreds of
+        // ms) — pure latency on EVERY send. The panel/settings probe fills
+        // the cache; a stale path just fails the actual run with a clearer
+        // error than "not found".
+        let cached = {
+            let state = app.state::<AppState>();
+            let cache = state.agent_cache.lock().unwrap();
+            cache.get(kind.id()).cloned()
+        };
+        let info = match cached {
+            Some(info) => info,
+            None => {
+                let detected = harbly_ai::detect_agent(kind)
+                    .await
+                    .ok_or_else(|| "未找到本地 agent".to_string())?;
+                let state = app.state::<AppState>();
+                state
+                    .agent_cache
+                    .lock()
+                    .unwrap()
+                    .insert(kind.id().to_string(), detected.clone());
+                detected
+            }
+        };
         let workdir = lib.root().join(".harbly").join("ai-workspace");
         let mcp_config_json = if kind == AgentKind::ClaudeCode {
             let server = mcp_server_path()?;
@@ -352,9 +417,10 @@ pub async fn ai_send(
     {
         let state = app.state::<AppState>();
         let mut busy = state.ai_busy.lock().unwrap();
-        if !busy.insert(session_id.clone()) {
+        if busy.contains_key(&session_id) {
             return Err("该会话已有正在进行的回合".to_string());
         }
+        busy.insert(session_id.clone(), cancel.clone());
         state
             .ai_jobs
             .lock()
@@ -367,7 +433,7 @@ pub async fn ai_send(
         session_id: session_id.clone(),
     };
 
-    let supply = resolve_supply(&lib, &session).await?;
+    let supply = resolve_supply(&app, &lib, &session).await?;
 
     // Context BEFORE this turn's user message lands in the transcript
     let history: Vec<ChatTurn> = lib
@@ -423,10 +489,14 @@ pub async fn ai_send(
     };
 
     // Persist tool-activity labels alongside the reply so the transcript
-    // replays faithfully after a restart.
+    // replays faithfully after a restart. The event counter feeds the
+    // stale-resume check: zero events ⇒ nothing streamed AND no tool ran.
     let actions: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let actions2 = actions.clone();
+    let events_seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let events2 = events_seen.clone();
     let mut sink = move |ev: harbly_ai::AiEvent| {
+        events2.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let harbly_ai::AiEvent::Action { label } = &ev {
             actions2.lock().unwrap().push(label.clone());
         }
@@ -439,7 +509,15 @@ pub async fn ai_send(
     // The claude CLI garbage-collects old sessions; a dead resume id would
     // otherwise brick this conversation on every send. Drop the id and rerun
     // fresh once — without a resume id the engine replays the transcript.
-    if resume.is_some() && is_stale_resume(&result) {
+    // The wording match is only a fast path: CLI copy moves around (observed:
+    // the detail hides in the result event's `errors` array), so the
+    // load-bearing signal is "agent failed before ANY event" — no events
+    // means no tool ran, making a fresh rerun side-effect-free.
+    let resumed_dead = resume.is_some()
+        && matches!(&result, Err(AiError::Agent(_)))
+        && (is_stale_resume(&result)
+            || events_seen.load(std::sync::atomic::Ordering::Relaxed) == 0);
+    if resumed_dead {
         let _ = lib.clear_ai_session_agent_id(&session_id);
         result =
             harbly_ai::run_turn(&task, &supply, &executor, None, cancel.clone(), &mut sink).await;

@@ -46,11 +46,14 @@ impl Library {
         std::fs::create_dir_all(root.join(HARBLY_DIR).join("versions"))?;
         std::fs::create_dir_all(root.join(HARBLY_DIR).join("thumbs"))?;
         let conn = db::open(&root.join(HARBLY_DIR).join("index.db"))?;
-        Ok(Library {
+        let lib = Library {
             root,
             db: Mutex::new(conn),
             jieba: Jieba::new(),
-        })
+        };
+        // Heal crash leftovers; never fail opening a library over it
+        let _ = lib.sweep_orphan_versions();
+        Ok(lib)
     }
 
     pub fn root(&self) -> &Path {

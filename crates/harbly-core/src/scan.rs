@@ -359,6 +359,39 @@ impl Library {
         Ok(next)
     }
 
+    /// Drop version rows whose snapshot file is missing. A hard kill between
+    /// write_version's row INSERT and its file write leaves such a phantom:
+    /// its preview 404s, rollback fails forever, and the dedup check would
+    /// match its hash without ever materializing a file. Runs at library
+    /// open; rows younger than a few seconds are skipped so a write that is
+    /// mid-flight in ANOTHER process is never swept.
+    pub(crate) fn sweep_orphan_versions(&self) -> Result<()> {
+        let cutoff = now() - 5;
+        let rows: Vec<(String, i64)> = {
+            let db = self.db.lock().unwrap();
+            let mut stmt =
+                db.prepare("SELECT asset_id, ver FROM versions WHERE created_at <= ?1")?;
+            let rows = stmt
+                .query_map([cutoff], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        let dead: Vec<&(String, i64)> = rows
+            .iter()
+            .filter(|(id, ver)| !self.version_file_path(id, *ver).is_file())
+            .collect();
+        if !dead.is_empty() {
+            let db = self.db.lock().unwrap();
+            for (id, ver) in dead {
+                db.execute(
+                    "DELETE FROM versions WHERE asset_id=?1 AND ver=?2",
+                    params![id, ver],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn remove_asset_rows(&self, id: &str, delete_version_files: bool) -> Result<()> {
         {
             let db = self.db.lock().unwrap();
@@ -448,5 +481,41 @@ impl Library {
             res.added += 1;
         }
         Ok(res)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn sweep_drops_fileless_version_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = crate::Library::open_or_create(tmp.path().join("L")).unwrap();
+        std::fs::write(
+            lib.root().join("a.html"),
+            "<html><title>A</title><body>x</body></html>",
+        )
+        .unwrap();
+        lib.scan(|_| {}).unwrap();
+        let a = lib
+            .list_assets("", crate::SortKey::Recent)
+            .unwrap()
+            .remove(0);
+        // Simulate the crash leftover: a version row whose file never landed
+        // (created_at 0 puts it safely past the mid-flight grace window)
+        {
+            let db = lib.db.lock().unwrap();
+            db.execute(
+                "INSERT INTO versions(asset_id, ver, hash, label, size_bytes, created_at)
+                 VALUES(?1, 99, 'nohash', 'AI 改版', 1, 0)",
+                rusqlite::params![a.id],
+            )
+            .unwrap();
+        }
+        assert_eq!(lib.list_versions(&a.id).unwrap().len(), 2);
+        lib.sweep_orphan_versions().unwrap();
+        let vs = lib.list_versions(&a.id).unwrap();
+        assert_eq!(vs.len(), 1);
+        // The real v1 (its file exists) survives the sweep
+        assert!(lib.version_file_path(&a.id, 1).is_file());
     }
 }
