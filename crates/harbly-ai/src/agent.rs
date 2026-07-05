@@ -205,9 +205,9 @@ pub(crate) async fn run_claude_turn(
     if let Some(m) = model {
         cmd.args(["--model", m]);
     }
-    // Claude Code's session effort knob (low|medium|high|xhigh|max); our
-    // levels are a valid subset. Unsupported levels fall back model-side.
-    if !task.effort.is_empty() {
+    // Claude Code's session effort knob accepts low|medium|high|xhigh|max;
+    // anything else (legacy empty, foreign values) is simply not passed.
+    if crate::is_anthropic_effort(&task.effort) {
         cmd.args(["--effort", &task.effort]);
     }
     cmd.current_dir(workdir);

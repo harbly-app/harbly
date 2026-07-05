@@ -97,8 +97,11 @@ export interface AiConfig {
 export type AiEvent =
   { type: "delta"; text: string } | { type: "action"; label: string };
 
-/** "" = provider default */
-export type AiEffort = "" | "low" | "medium" | "high";
+/** The full effort spectrum; each supply accepts a subset (see the panel's
+ * EFFORT_CHOICES). "" only appears on legacy sessions created before efforts
+ * became mandatory — the backend treats it as "send nothing". */
+export type AiEffort =
+  "" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface AiSession {
   id: string;

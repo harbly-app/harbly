@@ -132,11 +132,14 @@ export default function AiPanel() {
       setConfig(cfg);
       setDraft((d) => {
         const want = d.supply ?? cfg.supply ?? null;
+        const first: AiSupply | null = opts.length > 0 ? opts[0].id : null;
         const supply =
-          want != null && opts.some((o) => o.id === want)
-            ? want
-            : (opts[0]?.id ?? null);
-        return { ...d, supply };
+          want != null && opts.some((o) => o.id === want) ? want : first;
+        if (supply == null) return { ...d, supply };
+        // A draft always carries a concrete model + effort (no default tier)
+        return d.supply === supply && d.model !== ""
+          ? d
+          : { supply, ...initialPrefsFor(supply) };
       });
     });
   }, []);
@@ -575,31 +578,81 @@ function SessionMenu({
   );
 }
 
-/** Curated model choices per supply ("" = supply default, custom row covers
- * the rest). Ids verified against provider docs 2026-07-04 — note OpenRouter
- * spells Anthropic versions with dots (claude-opus-4.8) while the Anthropic
- * API uses dashes. A stale list is only cosmetic: the custom row accepts
- * anything. */
-const MODEL_CHOICES: Record<AiSupply, string[]> = {
-  claude: ["opus", "sonnet", "haiku", "fable"],
-  codex: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
-  anthropic: ["claude-opus-4-8", "claude-haiku-4-5", "claude-fable-5"],
-  openai: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.2"],
+/** Curated model choices per supply, chip-labeled. Ids verified against
+ * provider docs 2026-07-04 — note OpenRouter spells Anthropic versions with
+ * dots (claude-opus-4.8) while the Anthropic API uses dashes. First entry =
+ * the initial pick for new conversations (there is deliberately no "default"
+ * option — a session always pins an explicit model). The custom chip keeps
+ * any future id usable. */
+const MODEL_CHOICES: Record<AiSupply, { v: string; label: string }[]> = {
+  claude: [
+    { v: "sonnet", label: "Sonnet" },
+    { v: "opus", label: "Opus" },
+    { v: "haiku", label: "Haiku" },
+    { v: "fable", label: "Fable" },
+  ],
+  codex: [
+    { v: "gpt-5.5", label: "GPT-5.5" },
+    { v: "gpt-5.4", label: "GPT-5.4" },
+    { v: "gpt-5.4-mini", label: "5.4 Mini" },
+  ],
+  anthropic: [
+    { v: "claude-sonnet-5", label: "Sonnet 5" },
+    { v: "claude-opus-4-8", label: "Opus 4.8" },
+    { v: "claude-haiku-4-5", label: "Haiku 4.5" },
+    { v: "claude-fable-5", label: "Fable 5" },
+  ],
+  openai: [
+    { v: "gpt-5.5", label: "GPT-5.5" },
+    { v: "gpt-5.4", label: "GPT-5.4" },
+    { v: "gpt-5.4-mini", label: "5.4 Mini" },
+    { v: "gpt-5.2", label: "GPT-5.2" },
+  ],
   openrouter: [
-    "openai/gpt-5.5",
-    "google/gemini-3.1-pro-preview",
-    "google/gemini-3.5-flash",
-    "anthropic/claude-opus-4.8",
+    { v: "anthropic/claude-sonnet-5", label: "Sonnet 5" },
+    { v: "anthropic/claude-opus-4.8", label: "Opus 4.8" },
+    { v: "openai/gpt-5.5", label: "GPT-5.5" },
+    { v: "google/gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
+    { v: "google/gemini-3.5-flash", label: "Gemini 3.5 Flash" },
   ],
 };
 
-/** What "default" resolves to (mirrors the backend fallback); agents pick
- * their own default so they get no hint. */
-const DEFAULT_MODEL_HINT: Partial<Record<AiSupply, string>> = {
-  anthropic: "claude-sonnet-5",
-  openai: "gpt-5.5",
-  openrouter: "anthropic/claude-sonnet-5",
+/** The effort levels each supply ACTUALLY accepts (verified 2026-07-04):
+ * claude --effort and Anthropic output_config take low…max; codex
+ * model_reasoning_effort takes minimal…xhigh; OpenAI reasoning_effort takes
+ * none…xhigh; OpenRouter's reasoning.effort accepts the full spectrum and
+ * normalizes per upstream. First entry = initial pick (claude's documented
+ * session default is high; elsewhere medium). */
+const EFFORT_CHOICES: Record<AiSupply, AiEffort[]> = {
+  claude: ["high", "low", "medium", "xhigh", "max"],
+  codex: ["medium", "minimal", "low", "high", "xhigh"],
+  anthropic: ["medium", "low", "high", "xhigh", "max"],
+  openai: ["medium", "none", "low", "high", "xhigh"],
+  openrouter: ["medium", "none", "minimal", "low", "high", "xhigh", "max"],
 };
+
+/** Initial model + effort when a conversation adopts this supply. */
+function initialPrefsFor(supply: AiSupply): {
+  model: string;
+  effort: AiEffort;
+} {
+  return {
+    model: MODEL_CHOICES[supply][0].v,
+    effort: EFFORT_CHOICES[supply][0],
+  };
+}
+
+/** Stable display order for effort chips, regardless of which one is the
+ * initial pick. */
+const EFFORT_ORDER: AiEffort[] = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
 
 function PrefsMenu({
   t,
@@ -612,32 +665,34 @@ function PrefsMenu({
   prefs: Prefs;
   onChange: (p: Prefs) => void;
 }) {
-  const choices = prefs.supply ? MODEL_CHOICES[prefs.supply] : [];
-  // The custom row stays active while its value duplicates nothing curated
+  const supply = prefs.supply;
+  const choices = supply ? MODEL_CHOICES[supply] : [];
+  const efforts = supply
+    ? EFFORT_ORDER.filter((e) => EFFORT_CHOICES[supply].includes(e))
+    : [];
+  // The custom chip stays active while its value duplicates nothing curated
   const [custom, setCustom] = useState(
-    () => prefs.model !== "" && !choices.includes(prefs.model),
+    () => prefs.model !== "" && !choices.some((c) => c.v === prefs.model),
   );
-  const effortChoices: { v: AiEffort; label: string }[] = [
-    { v: "", label: t("aiEffortDefault") },
-    { v: "low", label: t("aiEffortLow") },
-    { v: "medium", label: t("aiEffortMedium") },
-    { v: "high", label: t("aiEffortHigh") },
-  ];
-  const defaultHint = prefs.supply ? DEFAULT_MODEL_HINT[prefs.supply] : null;
 
-  const modelRow = (value: string, label: string, activeWhen: boolean) => (
+  const chip = (
+    key: string,
+    label: string,
+    active: boolean,
+    onClick: () => void,
+    title?: string,
+  ) => (
     <button
-      key={value || "default"}
-      onClick={() => {
-        setCustom(false);
-        onChange({ ...prefs, model: value });
-      }}
-      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition hover:bg-side ${
-        activeWhen ? "font-bold text-primary" : ""
+      key={key}
+      onClick={onClick}
+      title={title}
+      className={`h-6 rounded-full border px-2.5 text-[10.5px] transition ${
+        active
+          ? "border-primary/40 bg-primary/10 font-bold text-primary"
+          : "border-line bg-side text-sub2 hover:border-primary/40"
       }`}
     >
-      <span className="min-w-0 flex-1 truncate text-left">{label}</span>
-      {activeWhen && <Check className="h-3 w-3 shrink-0" />}
+      {label}
     </button>
   );
 
@@ -651,7 +706,7 @@ function PrefsMenu({
           key={o.id}
           onClick={() => {
             setCustom(false);
-            onChange({ ...prefs, supply: o.id, model: "" });
+            onChange({ ...prefs, supply: o.id, ...initialPrefsFor(o.id) });
           }}
           className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition hover:bg-side ${
             prefs.supply === o.id ? "font-bold text-primary" : ""
@@ -667,32 +722,28 @@ function PrefsMenu({
       <div className="px-2.5 pt-2 pb-1 text-[10.5px] font-bold text-sub">
         {t("aiModelLabel")}
       </div>
-      {modelRow(
-        "",
-        defaultHint
-          ? `${t("aiModelDefault")} · ${defaultHint}`
-          : t("aiModelDefault"),
-        !custom && prefs.model === "",
-      )}
-      {choices.map((m) => modelRow(m, m, !custom && prefs.model === m))}
-      <button
-        onClick={() => setCustom(true)}
-        className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition hover:bg-side ${
-          custom ? "font-bold text-primary" : ""
-        }`}
-      >
-        <span className="min-w-0 flex-1 truncate text-left">
-          {t("aiModelCustom")}
-        </span>
-        {custom && <Check className="h-3 w-3 shrink-0" />}
-      </button>
+      <div className="flex flex-wrap gap-1 px-2.5 pb-1.5">
+        {choices.map((c) =>
+          chip(
+            c.v,
+            c.label,
+            !custom && prefs.model === c.v,
+            () => {
+              setCustom(false);
+              onChange({ ...prefs, model: c.v });
+            },
+            c.v,
+          ),
+        )}
+        {chip("custom", t("aiModelCustom"), custom, () => setCustom(true))}
+      </div>
       {custom && (
         <div className="px-2.5 pt-0.5 pb-1.5">
           <input
             autoFocus
             value={prefs.model}
             onChange={(e) => onChange({ ...prefs, model: e.target.value })}
-            placeholder={defaultHint ?? "model id"}
+            placeholder={choices[0]?.v ?? "model id"}
             className="h-7 w-full rounded-ctl border border-line bg-side px-2 text-[11px] outline-none focus:border-primary"
           />
         </div>
@@ -700,20 +751,12 @@ function PrefsMenu({
       <div className="px-2.5 pt-1 pb-1 text-[10.5px] font-bold text-sub">
         Effort
       </div>
-      <div className="flex gap-1 px-2.5 pb-2">
-        {effortChoices.map((c) => (
-          <button
-            key={c.v}
-            onClick={() => onChange({ ...prefs, effort: c.v })}
-            className={`h-6 flex-1 rounded-ctl border text-[10.5px] transition ${
-              prefs.effort === c.v
-                ? "border-primary bg-primary/10 font-bold text-primary"
-                : "border-line bg-side text-sub2 hover:border-primary/40"
-            }`}
-          >
-            {c.label}
-          </button>
-        ))}
+      <div className="flex flex-wrap gap-1 px-2.5 pb-2">
+        {efforts.map((e) =>
+          chip(e, e, prefs.effort === e, () =>
+            onChange({ ...prefs, effort: e }),
+          ),
+        )}
       </div>
     </MenuShell>
   );

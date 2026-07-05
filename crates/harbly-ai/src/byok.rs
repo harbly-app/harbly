@@ -194,7 +194,7 @@ fn anthropic_body(task: &SessionTask, model: &str, messages: &[Value]) -> Value 
     // - Fable/Mythos 5: thinking is always-on — the field must be OMITTED
     //   (sending enabled OR disabled is a 400), effort goes via output_config;
     // - Sonnet 5 / Opus 4.8+: adaptive thinking + output_config effort.
-    if !task.effort.is_empty() {
+    if crate::is_anthropic_effort(&task.effort) {
         let legacy =
             model.contains("haiku") || model.contains("-4-5") || model.contains("claude-3");
         if legacy {

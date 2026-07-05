@@ -191,15 +191,24 @@ impl CancelFlag {
 
 pub type EventSink<'a> = &'a mut (dyn FnMut(AiEvent) + Send);
 
-/// Effort → thinking-token budget, shared by the Anthropic API body and the
-/// Claude Code child environment (MAX_THINKING_TOKENS).
+/// Effort → thinking-token budget for the LEGACY Anthropic thinking shape
+/// (Haiku 4.5 / Claude ≤4.5 era). Budgets stay below the request max_tokens.
+/// "none"/"minimal" map to no thinking at all.
 pub(crate) fn thinking_budget(effort: &str) -> Option<u32> {
     match effort {
         "low" => Some(4_000),
         "medium" => Some(10_000),
         "high" => Some(24_000),
+        "xhigh" => Some(28_000),
+        "max" => Some(31_000),
         _ => None,
     }
+}
+
+/// The effort tokens Anthropic's output_config and Claude Code's --effort
+/// actually accept.
+pub(crate) fn is_anthropic_effort(effort: &str) -> bool {
+    matches!(effort, "low" | "medium" | "high" | "xhigh" | "max")
 }
 
 /// Run one conversation turn on the given supply. `resume` is the agent CLI's
