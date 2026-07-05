@@ -1,5 +1,11 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
+  AgentInfo,
+  AiConfig,
+  AiEvent,
+  AiMessage,
+  AiRun,
+  AiSession,
   AssetMeta,
   ImportResult,
   ScanSummary,
@@ -7,6 +13,7 @@ import type {
   SortKey,
   TagInfo,
   TreeNode,
+  VersionInfo,
 } from "./types";
 
 // Commands whose Rust side returns `()` resolve to `null` in the webview,
@@ -60,6 +67,7 @@ export const api = {
   getLanguage: () => invoke<string>("get_language"),
   revealAsset: (id: string) => invoke<null>("reveal_asset", { id }),
   openInBrowser: (id: string) => invoke<null>("open_in_browser", { id }),
+  openUrl: (url: string) => invoke<null>("open_url", { url }),
   revealFolder: (rel: string) => invoke<null>("reveal_folder", { rel }),
   createFolder: (parent: string, name: string) =>
     invoke<string>("create_folder", { parent, name }),
@@ -80,6 +88,53 @@ export const api = {
     invoke<string | null>("export_folder", { rel }),
   thumbsRebuild: () => invoke<null>("thumbs_rebuild"),
   requestThumbs: (ids: string[]) => invoke<null>("request_thumbs", { ids }),
+  listVersions: (id: string) => invoke<VersionInfo[]>("list_versions", { id }),
+  restoreVersion: (id: string, ver: number) =>
+    invoke<null>("restore_version", { id, ver }),
+  // AI
+  aiDetectAgents: () => invoke<AgentInfo[]>("ai_detect_agents"),
+  aiKeyStatus: () => invoke<Record<string, boolean>>("ai_key_status"),
+  aiSetKey: (provider: string, key: string) =>
+    invoke<null>("ai_set_key", { provider, key }),
+  aiGetConfig: () => invoke<AiConfig>("ai_get_config"),
+  aiSetConfig: (config: AiConfig) => invoke<null>("ai_set_config", { config }),
+  aiRunsList: (id: string, limit?: number) =>
+    invoke<AiRun[]>("ai_runs_list", { id, limit: limit ?? null }),
+  aiCancel: (job: string) => invoke<null>("ai_cancel", { job }),
+  // Sessions
+  aiSessionsList: () => invoke<AiSession[]>("ai_sessions_list"),
+  aiSessionCreate: (supply: string, model: string, effort: string) =>
+    invoke<AiSession>("ai_session_create", { supply, model, effort }),
+  aiSessionDelete: (id: string) => invoke<null>("ai_session_delete", { id }),
+  /** Undo the most recent session deletion; resolves with the restored id. */
+  aiSessionRestore: () => invoke<string | null>("ai_session_restore"),
+  aiSessionSetPrefs: (
+    id: string,
+    supply: string,
+    model: string,
+    effort: string,
+  ) => invoke<null>("ai_session_set_prefs", { id, supply, model, effort }),
+  aiSessionMessages: (id: string) =>
+    invoke<AiMessage[]>("ai_session_messages", { id }),
+  /** One conversation turn: resolves with the assistant message when the turn
+   * finishes; progress (text deltas + tool actions) streams via `onEvent`. */
+  aiSend: (
+    args: {
+      job: string;
+      sessionId: string;
+      text: string;
+      currentAssetId?: string | null;
+    },
+    onEvent: (e: AiEvent) => void,
+  ) => {
+    const ch = new Channel<AiEvent>();
+    ch.onmessage = onEvent;
+    return invoke<AiMessage>("ai_send", {
+      ...args,
+      currentAssetId: args.currentAssetId ?? null,
+      onEvent: ch,
+    });
+  },
 };
 
 export const assetUrl = (id: string) =>
@@ -97,19 +152,29 @@ export const relAssetUrl = (id: string, rel: string) =>
 export const thumbUrl = (hash: string) =>
   `harbly-thumb://localhost/${hash}.jpg`;
 
-export function timeAgo(epochSec: number): string {
+/** Sandboxed URL of a historical version snapshot (same CSP as `assetUrl`) */
+export const versionUrl = (id: string, ver: number) =>
+  `harbly-asset://localhost/version/${encodeURIComponent(id)}/${ver}`;
+
+/** Relative time in the UI language (the app's six locales are all valid
+ * BCP-47 tags, so they feed Intl directly). */
+export function timeAgo(epochSec: number, lang = "zh-CN"): string {
   const s = Math.max(0, Math.floor(Date.now() / 1000) - epochSec);
-  if (s < 60) return "刚刚";
+  const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
+  if (s < 60) return rtf.format(0, "second");
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m} 分钟前`;
+  if (m < 60) return rtf.format(-m, "minute");
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小时前`;
+  if (h < 24) return rtf.format(-h, "hour");
   const d = Math.floor(h / 24);
-  if (d < 7) return `${d} 天前`;
+  if (d < 7) return rtf.format(-d, "day");
   const w = Math.floor(d / 7);
-  if (w < 5) return `${w} 周前`;
-  const dt = new Date(epochSec * 1000);
-  return `${dt.getFullYear()}/${dt.getMonth() + 1}/${dt.getDate()}`;
+  if (w < 5) return rtf.format(-w, "week");
+  return new Intl.DateTimeFormat(lang, {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).format(new Date(epochSec * 1000));
 }
 
 export function fmtSize(bytes: number): string {

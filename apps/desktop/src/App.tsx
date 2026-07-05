@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -15,9 +15,13 @@ import CommandPalette from "./components/CommandPalette";
 import Modals from "./components/Modals";
 import DragGhost from "./components/DragGhost";
 
+// Lazy: sessions, transcripts and supply probing only load when the panel opens
+const AiPanel = lazy(() => import("./components/AiPanel"));
+
 export default function App() {
   const phase = useStore((s) => s.phase);
   const viewerOpen = useStore((s) => s.viewerAsset !== null);
+  const aiOpen = useStore((s) => s.aiOpen);
   const dragOver = useStore((s) => s.dragOver);
   const toast = useStore((s) => s.toast);
   const t = makeT(useStore((s) => s.lang));
@@ -189,6 +193,20 @@ export default function App() {
       // Plain-browser dev: no window handle
     }
 
+    // App shortcuts forwarded from inside the sandboxed preview iframe: it is
+    // cross-origin, so its keydowns never bubble to this window — the injected
+    // reporter script relays ⌘J/⌘K/⌘B via postMessage instead.
+    const onIframeKey = (e: MessageEvent) => {
+      const d = e.data as { __harbly?: string; key?: string } | null;
+      if (d?.__harbly !== "key") return;
+      const st = useStore.getState();
+      if (st.phase !== "main") return;
+      if (d.key === "j") st.toggleAi();
+      else if (d.key === "k") st.setPalette(true);
+      else if (d.key === "b") st.toggleSidebar();
+    };
+    window.addEventListener("message", onIframeKey);
+
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -196,6 +214,11 @@ export default function App() {
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
         useStore.getState().toggleSidebar();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
+        // AI panel is library-scoped: toggle anywhere
+        e.preventDefault();
+        const st = useStore.getState();
+        if (st.phase === "main") st.toggleAi();
       } else if ((e.metaKey || e.ctrlKey) && e.key === ",") {
         e.preventDefault();
         const st = useStore.getState();
@@ -207,6 +230,7 @@ export default function App() {
       alive = false;
       unsubs.forEach((u) => u());
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("message", onIframeKey);
     };
   }, []);
 
@@ -227,7 +251,19 @@ export default function App() {
       <TitleBar />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
-        {viewerOpen ? <Viewer /> : <AssetGrid />}
+        {/* `relative` anchors the AI panel's narrow-window overlay mode */}
+        <div className="relative flex min-w-0 flex-1">
+          {viewerOpen ? <Viewer /> : <AssetGrid />}
+          {aiOpen && (
+            <Suspense
+              fallback={
+                <div className="ai-panel shrink-0" aria-hidden="true" />
+              }
+            >
+              <AiPanel />
+            </Suspense>
+          )}
+        </div>
       </div>
       <CommandPalette />
       <Modals />

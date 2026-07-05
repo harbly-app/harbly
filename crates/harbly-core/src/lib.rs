@@ -1,3 +1,4 @@
+mod ai_meta;
 mod db;
 mod error;
 mod extract;
@@ -8,6 +9,10 @@ mod tags_xattr;
 mod types;
 mod watch;
 
+pub use ai_meta::{
+    AiMessage, AiRunRecord, AiSession, AiSessionSnapshot, AiToolCtx, AiWriteOutcome, NewAiRun,
+    AI_VERSION_LABEL,
+};
 pub use error::{HarblyError, Result};
 pub use markdown::md_to_html_body;
 pub use ops::copy_dir_recursive;
@@ -41,11 +46,14 @@ impl Library {
         std::fs::create_dir_all(root.join(HARBLY_DIR).join("versions"))?;
         std::fs::create_dir_all(root.join(HARBLY_DIR).join("thumbs"))?;
         let conn = db::open(&root.join(HARBLY_DIR).join("index.db"))?;
-        Ok(Library {
+        let lib = Library {
             root,
             db: Mutex::new(conn),
             jieba: Jieba::new(),
-        })
+        };
+        // Heal crash leftovers; never fail opening a library over it
+        let _ = lib.sweep_orphan_versions();
+        Ok(lib)
     }
 
     pub fn root(&self) -> &Path {
@@ -89,9 +97,11 @@ impl Library {
             .unwrap_or_else(|| "html".to_string())
     }
 
-    /// Relative path → absolute path. Rejects path traversal.
+    /// Relative path → absolute path. Rejects traversal AND absolute inputs:
+    /// `Path::join` DISCARDS the base when handed an absolute path, so an
+    /// absolute `rel` (e.g. model-supplied) would silently escape the root.
     pub fn abs(&self, rel: &str) -> PathBuf {
-        if rel.split('/').any(|c| c == "..") {
+        if Path::new(rel).is_absolute() || rel.split('/').any(|c| c == "..") {
             return self.root.join("__invalid__");
         }
         self.root.join(rel)

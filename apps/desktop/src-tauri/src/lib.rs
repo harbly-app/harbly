@@ -1,3 +1,4 @@
+mod ai;
 mod commands;
 mod i18n;
 mod md_template;
@@ -43,6 +44,7 @@ pub fn run() {
             commands::assets_trash,
             commands::reveal_asset,
             commands::open_in_browser,
+            commands::open_url,
             commands::reveal_folder,
             commands::create_folder,
             commands::folder_rename,
@@ -67,6 +69,20 @@ pub fn run() {
             commands::forward_edit_action,
             commands::set_language,
             commands::get_language,
+            ai::ai_detect_agents,
+            ai::ai_key_status,
+            ai::ai_set_key,
+            ai::ai_get_config,
+            ai::ai_set_config,
+            ai::ai_runs_list,
+            ai::ai_sessions_list,
+            ai::ai_session_create,
+            ai::ai_session_delete,
+            ai::ai_session_restore,
+            ai::ai_session_set_prefs,
+            ai::ai_session_messages,
+            ai::ai_send,
+            ai::ai_cancel,
         ])
         .setup(|app| {
             use tauri::Manager;

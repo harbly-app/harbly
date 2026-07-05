@@ -208,6 +208,105 @@ textarea,
   display: none;
 }
 
+/* AI panel: fixed 320px column (design token 300–324). On narrow windows it
+   overlays the preview's right edge instead of squeezing the content pane —
+   the viewer wrapper is position:relative for exactly this. */
+.ai-panel {
+  width: 320px;
+}
+
+/* Markdown inside assistant replies, tuned to the panel's 12px scale.
+   react-markdown escapes raw HTML, so this only ever styles generated tags. */
+.ai-md > *:first-child {
+  margin-top: 0;
+}
+.ai-md > *:last-child {
+  margin-bottom: 0;
+}
+.ai-md p,
+.ai-md ul,
+.ai-md ol,
+.ai-md table,
+.ai-md blockquote,
+.ai-md pre {
+  margin: 0.4em 0;
+}
+.ai-md h1,
+.ai-md h2,
+.ai-md h3,
+.ai-md h4 {
+  margin: 0.7em 0 0.3em;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.ai-md ul,
+.ai-md ol {
+  padding-left: 1.2em;
+  list-style: revert;
+}
+.ai-md li {
+  margin: 0.15em 0;
+}
+.ai-md code {
+  background: var(--color-side);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 11px;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+}
+.ai-md pre {
+  background: var(--color-side);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-ctl);
+  padding: 8px 10px;
+  overflow-x: auto;
+}
+.ai-md pre code {
+  background: none;
+  padding: 0;
+}
+.ai-md table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+.ai-md th,
+.ai-md td {
+  border: 1px solid var(--color-line);
+  padding: 3px 7px;
+  text-align: left;
+}
+.ai-md th {
+  background: var(--color-side);
+  font-weight: 700;
+}
+.ai-md blockquote {
+  border-left: 2px solid var(--color-line-strong);
+  padding-left: 8px;
+  color: var(--color-sub2);
+}
+.ai-md a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ai-md hr {
+  border: none;
+  border-top: 1px solid var(--color-line);
+  margin: 0.6em 0;
+}
+@media (max-width: 1080px) {
+  .ai-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    box-shadow: -12px 0 32px -18px rgb(0 0 0 / 0.35);
+  }
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;

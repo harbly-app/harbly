@@ -60,6 +60,7 @@ export default function Viewer() {
 
   if (!a) return null;
   // Markdown opens in the WYSIWYG editor; HTML in the sandboxed preview.
+  // (The AI panel lives one level up, in App — it is library-scoped now.)
   if (isMd(a.fileName)) {
     return (
       <Suspense

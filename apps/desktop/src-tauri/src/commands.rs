@@ -21,7 +21,7 @@ fn read_config(app: &AppHandle) -> serde_json::Value {
         .unwrap_or_else(|| serde_json::json!({}))
 }
 
-fn write_config_key(app: &AppHandle, key: &str, value: serde_json::Value) {
+pub(crate) fn write_config_key(app: &AppHandle, key: &str, value: serde_json::Value) {
     if let Some(p) = config_path(app) {
         let mut v = read_config(app);
         if !v.is_object() {
@@ -30,6 +30,11 @@ fn write_config_key(app: &AppHandle, key: &str, value: serde_json::Value) {
         v[key] = value;
         let _ = std::fs::write(p, v.to_string());
     }
+}
+
+/// One top-level config.json value (used by the AI settings section).
+pub(crate) fn read_config_value(app: &AppHandle, key: &str) -> Option<serde_json::Value> {
+    read_config(app).get(key).cloned()
 }
 
 fn saved_library(app: &AppHandle) -> Option<PathBuf> {
@@ -115,6 +120,9 @@ pub fn activate_library(app: &AppHandle, root: PathBuf) -> Result<String, String
     // Invalidate the old library's undo log (its paths no longer belong to the current library)
     state.undo_stack.lock().unwrap().clear();
     state.redo_stack.lock().unwrap().clear();
+    // Same for the AI-session undo slot: restoring it would write the OLD
+    // library's transcript into the new library's database
+    *state.ai_deleted_session.lock().unwrap() = None;
     sync_undo_menu(app);
 
     save_library(app, lib.root());
@@ -143,6 +151,24 @@ pub fn enqueue_missing_thumbs(app: &AppHandle) {
                 hash: a.current_hash,
             });
         }
+    }
+}
+
+/// Queue a thumbnail for ONE asset — AI writes refresh just the touched file;
+/// a full missing-scan per write would stat the entire library on every
+/// tool call of a multi-write turn.
+pub fn enqueue_thumb_for(app: &AppHandle, id: &str) {
+    let state = app.state::<AppState>();
+    let Ok(lib) = state.lib() else { return };
+    let Ok(a) = lib.asset(id) else { return };
+    let tx = state.thumb_tx.lock().unwrap();
+    let Some(tx) = tx.as_ref() else { return };
+    if !lib.thumb_path(&a.current_hash).exists() {
+        let _ = tx.send(ThumbJob {
+            url: format!("harbly-asset://localhost/current/{}", a.id),
+            asset_id: a.id,
+            hash: a.current_hash,
+        });
     }
 }
 
@@ -1227,6 +1253,27 @@ pub async fn forward_edit_action(app: AppHandle, action: String) -> Result<(), S
     on_main(&app, move || {
         crate::pasteboard::forward_responder_action(&action)
     })?
+}
+
+/// Open an external link in the default browser (used by links inside AI
+/// replies — the webview itself must never navigate).
+#[tauri::command]
+pub async fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err("仅支持 http/https 链接".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("暂仅支持 macOS".to_string())
+    }
 }
 
 fn open_with_system(path: &std::path::Path, reveal: bool) -> Result<(), String> {

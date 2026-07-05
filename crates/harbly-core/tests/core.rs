@@ -452,3 +452,342 @@ fn finder_tags_xattr_interop() {
     lib.set_tags(&id, &[]).unwrap();
     assert!(harbly_core::read_file_tags(&abs).is_empty());
 }
+
+#[test]
+fn ai_apply_output_appends_version_and_reindexes() {
+    let (_tmp, lib) = setup();
+    let root = lib.root().to_path_buf();
+    fs::write(root.join("page.html"), html("Pricing", "旧的定价方案")).unwrap();
+    lib.scan(|_| {}).unwrap();
+    let a = lib.asset_by_rel("page.html").unwrap();
+    assert_eq!(a.ver_count, 1);
+
+    let ver = lib
+        .apply_ai_output(&a.id, &html("Pricing", "全新的深色定价"), "AI 改版")
+        .unwrap();
+    assert_eq!(ver, 2);
+
+    // File content, version chain, and FTS index all reflect the new content
+    let a2 = lib.asset(&a.id).unwrap();
+    assert_eq!(a2.ver_count, 2);
+    let versions = lib.list_versions(&a.id).unwrap();
+    assert_eq!(versions[0].label, "AI 改版");
+    assert!(lib.read_asset_text(&a.id).unwrap().contains("深色定价"));
+    assert_eq!(lib.search("深色").unwrap().len(), 1);
+
+    // Identical content again → dedup guard keeps the chain unchanged
+    let same = lib
+        .apply_ai_output(&a.id, &html("Pricing", "全新的深色定价"), "AI 改版")
+        .unwrap();
+    assert_eq!(same, 2);
+    assert_eq!(lib.asset(&a.id).unwrap().ver_count, 2);
+
+    // Rollback restores v1 content as a new version (history never rewritten)
+    lib.restore_version(&a.id, 1).unwrap();
+    assert!(lib.read_asset_text(&a.id).unwrap().contains("旧的定价方案"));
+    assert_eq!(lib.asset(&a.id).unwrap().ver_count, 3);
+}
+
+#[test]
+fn ai_write_snapshots_unversioned_live_edits_first() {
+    let (_tmp, lib) = setup();
+    fs::write(lib.root().join("note.html"), html("Note", "第一版")).unwrap();
+    lib.scan(|_| {}).unwrap();
+    let a = lib.asset_by_rel("note.html").unwrap();
+
+    // Editor autosave: live file changes with NO version captured
+    lib.write_asset_text(&a.id, &html("Note", "用户手打的心血内容"))
+        .unwrap();
+    assert_eq!(lib.asset(&a.id).unwrap().ver_count, 1);
+
+    // An AI write must not destroy the only copy of those edits: the live
+    // content is checkpointed (编辑) before the AI version lands
+    let ver = lib
+        .apply_ai_output(&a.id, &html("Note", "AI 重写后的内容"), "AI 改版")
+        .unwrap();
+    assert_eq!(ver, 3);
+    let versions = lib.list_versions(&a.id).unwrap();
+    assert_eq!(versions[0].label, "AI 改版");
+    assert_eq!(versions[1].label, "编辑");
+    let saved = fs::read_to_string(lib.version_file_path(&a.id, 2)).unwrap();
+    assert!(saved.contains("用户手打的心血内容"));
+
+    // Even a byte-identical AI re-emission of an OLD version cannot clobber
+    // newer live edits: the pre-snapshot bumps the chain first
+    lib.write_asset_text(&a.id, &html("Note", "又一轮未存档编辑"))
+        .unwrap();
+    let ver = lib
+        .apply_ai_output(&a.id, &html("Note", "AI 重写后的内容"), "AI 改版")
+        .unwrap();
+    assert_eq!(ver, 5);
+    let recovered = fs::read_to_string(lib.version_file_path(&a.id, 4)).unwrap();
+    assert!(recovered.contains("又一轮未存档编辑"));
+}
+
+#[test]
+fn ai_runs_record_list_and_cleanup() {
+    let (_tmp, lib) = setup();
+    let root = lib.root().to_path_buf();
+    fs::write(root.join("a.html"), html("A", "内容")).unwrap();
+    lib.scan(|_| {}).unwrap();
+    let a = lib.asset_by_rel("a.html").unwrap();
+
+    let rec = lib
+        .record_ai_run(&harbly_core::NewAiRun {
+            asset_id: a.id.clone(),
+            kind: "revise".into(),
+            supply: "anthropic".into(),
+            model: "claude-sonnet-5".into(),
+            instruction: "改成深色".into(),
+            status: "ok".into(),
+            ver: Some(2),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(rec.status, "ok");
+    lib.record_ai_run(&harbly_core::NewAiRun {
+        asset_id: a.id.clone(),
+        kind: "review".into(),
+        supply: "claude".into(),
+        model: String::new(),
+        instruction: String::new(),
+        status: "ok".into(),
+        ver: None,
+        report: Some("# 报告\n一切正常".into()),
+        ..Default::default()
+    })
+    .unwrap();
+
+    let runs = lib.list_ai_runs(&a.id, 50).unwrap();
+    assert_eq!(runs.len(), 2);
+    // Newest first: the review comes back on top
+    assert_eq!(runs[0].kind, "review");
+    assert_eq!(runs[0].report.as_deref(), Some("# 报告\n一切正常"));
+    assert_eq!(runs[1].ver, Some(2));
+
+    // Trashing the asset clears its run records too
+    lib.trash_asset(&a.id).unwrap();
+    assert!(lib.list_ai_runs(&a.id, 50).unwrap().is_empty());
+}
+
+#[test]
+fn ai_sessions_and_messages_roundtrip() {
+    let (_tmp, lib) = setup();
+
+    let s = lib.create_ai_session("claude", "", "medium").unwrap();
+    assert_eq!(s.title, "");
+
+    // First user message titles the session; appends bump activity order
+    lib.append_ai_message(&s.id, "user", "帮我完善这个文档，第一段更口语化", &[])
+        .unwrap();
+    lib.append_ai_message(
+        &s.id,
+        "assistant",
+        "已完善。",
+        &["read_asset a.html".to_string()],
+    )
+    .unwrap();
+    let msgs = lib.list_ai_messages(&s.id).unwrap();
+    assert_eq!(msgs.len(), 2);
+    assert_eq!(msgs[0].role, "user");
+    assert_eq!(msgs[1].actions, vec!["read_asset a.html".to_string()]);
+
+    let got = lib.get_ai_session(&s.id).unwrap().unwrap();
+    assert!(got.title.starts_with("帮我完善"));
+
+    // A second session becomes the most recent one
+    let s2 = lib
+        .create_ai_session("anthropic", "claude-sonnet-5", "high")
+        .unwrap();
+    let list = lib.list_ai_sessions(10).unwrap();
+    assert_eq!(list[0].id, s2.id);
+
+    // Prefs update; switching supply drops the foreign resume id
+    lib.set_ai_session_agent_id(&s.id, "abc-123").unwrap();
+    lib.set_ai_session_prefs(&s.id, "claude", "", "high")
+        .unwrap();
+    assert_eq!(
+        lib.get_ai_session(&s.id).unwrap().unwrap().agent_session_id,
+        Some("abc-123".to_string())
+    );
+    lib.set_ai_session_prefs(&s.id, "openai", "gpt-5.1", "")
+        .unwrap();
+    assert_eq!(
+        lib.get_ai_session(&s.id).unwrap().unwrap().agent_session_id,
+        None
+    );
+
+    // Delete hands back a snapshot; restore resurrects transcript + title
+    let snap = lib.delete_ai_session(&s.id).unwrap().unwrap();
+    assert!(lib.get_ai_session(&s.id).unwrap().is_none());
+    assert!(lib.list_ai_messages(&s.id).unwrap().is_empty());
+    assert_eq!(snap.messages.len(), 2);
+    lib.restore_ai_session(&snap).unwrap();
+    let back = lib.get_ai_session(&s.id).unwrap().unwrap();
+    assert!(back.title.starts_with("帮我完善"));
+    let msgs = lib.list_ai_messages(&s.id).unwrap();
+    assert_eq!(msgs.len(), 2);
+    assert_eq!(msgs[1].actions, vec!["read_asset a.html".to_string()]);
+    // Deleting a nonexistent session is a no-op, not an error
+    assert!(lib.delete_ai_session("ghost").unwrap().is_none());
+}
+
+#[test]
+fn ai_creates_new_asset() {
+    let (_tmp, lib) = setup();
+    let a = lib
+        .create_asset_from_ai(
+            "",
+            "合并结果",
+            "<!doctype html><html><title>合并</title></html>",
+        )
+        .unwrap();
+    assert_eq!(a.file_name, "合并结果.html");
+    assert_eq!(a.source, "ai");
+    assert_eq!(a.ver_count, 1);
+    // Name collision auto-suffixes; explicit .md keeps its type
+    let b = lib
+        .create_asset_from_ai("", "合并结果", "<html>2</html>")
+        .unwrap();
+    assert_eq!(b.file_name, "合并结果-2.html");
+    let c = lib
+        .create_asset_from_ai("笔记", "notes.md", "# hi")
+        .unwrap();
+    assert_eq!(c.rel_path, "笔记/notes.md");
+    assert_eq!(lib.search("合并").unwrap().len(), 2);
+}
+
+#[test]
+fn ai_tool_surface_reads_writes_and_records() {
+    let (_tmp, lib) = setup();
+    let root = lib.root().to_path_buf();
+    fs::write(root.join("pricing.html"), html("定价", "旧定价方案")).unwrap();
+    lib.scan(|_| {}).unwrap();
+    let a = lib.asset_by_rel("pricing.html").unwrap();
+    let s = lib
+        .create_ai_session("anthropic", "claude-sonnet-5", "")
+        .unwrap();
+    let ctx = harbly_core::AiToolCtx {
+        supply: "anthropic".into(),
+        model: "claude-sonnet-5".into(),
+        session_id: Some(s.id.clone()),
+    };
+
+    // search → read → write → create, all through the single tool entry point
+    let (v, w) = lib
+        .execute_ai_tool("search_library", &serde_json::json!({"query":"定价"}), &ctx)
+        .unwrap();
+    assert!(w.is_none());
+    assert_eq!(v["results"][0]["asset_id"], a.id.as_str());
+
+    let (v, _) = lib
+        .execute_ai_tool("read_asset", &serde_json::json!({"asset_id": a.id}), &ctx)
+        .unwrap();
+    assert!(v["content"].as_str().unwrap().contains("旧定价方案"));
+
+    let (v, w) = lib
+        .execute_ai_tool(
+            "write_asset",
+            &serde_json::json!({"asset_id": a.id, "content": html("定价", "新深色定价"), "summary": "换深色"}),
+            &ctx,
+        )
+        .unwrap();
+    assert_eq!(v["ver"], 2);
+    assert!(!w.as_ref().unwrap().created);
+    assert!(lib.read_asset_text(&a.id).unwrap().contains("新深色定价"));
+
+    let (v, w) = lib
+        .execute_ai_tool(
+            "create_asset",
+            &serde_json::json!({"name": "merged", "content": "<html><title>合并页</title></html>", "folder": ""}),
+            &ctx,
+        )
+        .unwrap();
+    assert_eq!(v["file_name"], "merged.html");
+    assert!(w.unwrap().created);
+
+    // Both writes recorded with session attribution; message link-up works
+    let runs = lib.list_ai_runs(&a.id, 10).unwrap();
+    assert_eq!(runs[0].kind, "revise");
+    assert_eq!(runs[0].session_id.as_deref(), Some(s.id.as_str()));
+    assert!(runs[0].message_id.is_none());
+    lib.link_runs_to_message(&s.id, "msg-1", 0).unwrap();
+    let runs = lib.list_ai_runs(&a.id, 10).unwrap();
+    assert_eq!(runs[0].message_id.as_deref(), Some("msg-1"));
+
+    // Guard rails: unknown tool, bad ids, traversal
+    assert!(lib
+        .execute_ai_tool("rm_rf", &serde_json::json!({}), &ctx)
+        .is_err());
+    assert!(lib
+        .execute_ai_tool("read_asset", &serde_json::json!({"asset_id":"nope"}), &ctx)
+        .is_err());
+    assert!(lib
+        .execute_ai_tool(
+            "create_asset",
+            &serde_json::json!({"name":"x","content":"y","folder":"../out"}),
+            &ctx
+        )
+        .is_err());
+}
+
+#[test]
+fn ai_tools_list_and_delete() {
+    let (_tmp, lib) = setup();
+    let root = lib.root().to_path_buf();
+    fs::write(root.join("full.html"), html("Full", "有内容")).unwrap();
+    fs::write(root.join("empty.html"), "").unwrap();
+    lib.scan(|_| {}).unwrap();
+    let ctx = harbly_core::AiToolCtx::default();
+
+    // Enumeration exposes sizes — this is how "find the empty files" works
+    let (v, w) = lib
+        .execute_ai_tool("list_assets", &serde_json::json!({}), &ctx)
+        .unwrap();
+    assert!(w.is_none());
+    assert_eq!(v["total"], 2);
+    let assets = v["assets"].as_array().unwrap();
+    let empty = assets
+        .iter()
+        .find(|a| a["file_name"] == "empty.html")
+        .unwrap();
+    assert_eq!(empty["size_bytes"], 0);
+    let empty_id = empty["asset_id"].as_str().unwrap().to_string();
+
+    // Deletion goes to the system Trash and cleans the index
+    let (v, w) = lib
+        .execute_ai_tool(
+            "delete_asset",
+            &serde_json::json!({ "asset_id": empty_id }),
+            &ctx,
+        )
+        .unwrap();
+    assert_eq!(v["deleted"], "empty.html");
+    assert!(!w.unwrap().created);
+    assert!(lib.asset(&empty_id).is_err());
+    assert_eq!(lib.total_count().unwrap(), 1);
+
+    // Folder traversal rejected on list too
+    assert!(lib
+        .execute_ai_tool("list_assets", &serde_json::json!({"folder": "../x"}), &ctx)
+        .is_err());
+
+    // Absolute folders must not escape the library (Path::join swaps the root)
+    let outside = std::env::temp_dir().join("harbly-escape-test");
+    let _ = fs::remove_dir_all(&outside);
+    assert!(lib
+        .execute_ai_tool(
+            "create_asset",
+            &serde_json::json!({
+                "folder": outside.to_string_lossy(),
+                "name": "evil",
+                "content": "<html>x</html>",
+            }),
+            &ctx,
+        )
+        .is_err());
+    assert!(!outside.exists());
+    assert!(lib
+        .execute_ai_tool("list_assets", &serde_json::json!({"folder": "/etc"}), &ctx)
+        .is_err());
+}

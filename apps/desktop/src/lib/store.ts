@@ -18,7 +18,14 @@ export type Modal =
   | { kind: "newFolder"; parent: string }
   | { kind: "tags"; asset: AssetMeta }
   | { kind: "confirmDeleteFolder"; rel: string; label: string }
-  | { kind: "settings" };
+  | { kind: "settings" }
+  /** Side-by-side version compare; `fromVer` is the baseline (null hides the left pane) */
+  | {
+      kind: "aiDiff";
+      asset: AssetMeta;
+      fromVer: number | null;
+      toVer: number;
+    };
 
 export interface DragPayload {
   ids: string[];
@@ -76,6 +83,10 @@ interface S {
   dragAsset: DragPayload | null;
   dropTarget: string | null;
   sidebarOpen: boolean;
+  /** AI panel visibility inside the viewer (⌘J), persisted across sessions */
+  aiOpen: boolean;
+  /** Bumped when AI credentials/config change in settings, so a mounted panel re-probes supplies */
+  aiConfigEpoch: number;
   /** Markdown editor width: false = comfortable reading column, true = fill the pane */
   mdWide: boolean;
   /** UI language (six locales), kept in sync with the native menu */
@@ -88,6 +99,10 @@ interface S {
   setLang: (l: Lang) => void;
   setTheme: (t: ThemePref) => void;
   toggleSidebar: () => void;
+  toggleAi: () => void;
+  bumpAiConfig: () => void;
+  /** Open the viewer on an asset with the AI panel expanded (grid menu / palette / ⌘J on a selection) */
+  openAiFor: (id: string) => void;
   toggleMdWide: () => void;
   boot: () => Promise<void>;
   enterMain: () => Promise<void>;
@@ -209,6 +224,8 @@ export const useStore = create<S>((set, get) => ({
   dragAsset: null,
   dropTarget: null,
   sidebarOpen: localStorage.getItem("harbly.sidebar") !== "0",
+  aiOpen: localStorage.getItem("harbly.aiPanel") === "1",
+  aiConfigEpoch: 0,
   mdWide: localStorage.getItem("harbly.mdWide") === "1",
   lang: bootLang,
   theme: bootTheme,
@@ -232,6 +249,21 @@ export const useStore = create<S>((set, get) => ({
       localStorage.setItem("harbly.sidebar", v ? "1" : "0");
       return { sidebarOpen: v };
     }),
+
+  toggleAi: () =>
+    set((s) => {
+      const v = !s.aiOpen;
+      localStorage.setItem("harbly.aiPanel", v ? "1" : "0");
+      return { aiOpen: v };
+    }),
+
+  bumpAiConfig: () => set((s) => ({ aiConfigEpoch: s.aiConfigEpoch + 1 })),
+
+  openAiFor: (id) => {
+    localStorage.setItem("harbly.aiPanel", "1");
+    set({ aiOpen: true });
+    get().openViewer(id);
+  },
 
   toggleMdWide: () =>
     set((s) => {
