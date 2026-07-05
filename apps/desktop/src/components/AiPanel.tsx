@@ -246,7 +246,9 @@ export default function AiPanel() {
   }, [sessionKey]);
 
   useEffect(() => {
-    if (skipLoadRef.current === activeId) {
+    // Only a real session id can match — both sides being null (new
+    // conversation with nothing to skip) must still clear the transcript
+    if (activeId !== null && skipLoadRef.current === activeId) {
       skipLoadRef.current = null;
       return;
     }
