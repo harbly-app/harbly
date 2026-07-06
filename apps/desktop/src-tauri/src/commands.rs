@@ -871,6 +871,36 @@ pub async fn open_in_browser(app: AppHandle, id: String) -> Result<(), String> {
     open_with_system(&p, false)
 }
 
+/// Preview an hdoc page in the system browser without exporting: bake the same
+/// standalone HTML as the export into a temp file and open it. Relative media
+/// resolve against the source folder through a file:// base, so the throwaway
+/// copy still shows images. The `.hdoc` extension has no default app, so this
+/// replaces "open with default app" for hdoc pages.
+#[tauri::command]
+pub async fn preview_hdoc(app: AppHandle, id: String) -> Result<(), String> {
+    let lib = app.state::<AppState>().lib()?;
+    let src = lib.asset_abs_path(&id).map_err(|e| e.to_string())?;
+    let text = std::fs::read_to_string(&src).map_err(|e| e.to_string())?;
+    let lang = cur_lang(&app);
+    let t = crate::i18n::l(&lang);
+    let rel_base = src
+        .parent()
+        .and_then(|d| url::Url::from_directory_path(d).ok())
+        .map(|u| u.to_string());
+    let page = crate::hdoc_template::render_page(
+        &text,
+        &crate::hdoc_template::HdocRender {
+            lang: &lang,
+            toc_label: t.toc,
+            rel_base: rel_base.as_deref(),
+            nonce: None,
+        },
+    );
+    let dest = std::env::temp_dir().join(format!("harbly-preview-{id}.html"));
+    std::fs::write(&dest, page.as_bytes()).map_err(|e| e.to_string())?;
+    open_with_system(&dest, false)
+}
+
 #[tauri::command]
 pub async fn reveal_folder(app: AppHandle, rel: String) -> Result<(), String> {
     let lib = app.state::<AppState>().lib()?;

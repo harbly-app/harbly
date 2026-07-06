@@ -84,6 +84,7 @@ const zhCN: Dict = {
   blockedN: "沙箱已拦截 {n} 个外链请求 · 本次放行",
   allowedTemp: "已临时放行外链 · 点击恢复沙箱",
   openWithDefaultApp: "用默认应用打开",
+  previewInBrowser: "在浏览器预览",
   // Markdown editor
   mdPlaceholder: "开始输入…",
   mdConflictTitle: "磁盘上的文件已被外部修改",
@@ -317,6 +318,7 @@ const zhTW: Dict = {
   blockedN: "沙箱已攔截 {n} 個外部連線 · 本次放行",
   allowedTemp: "已暫時放行外部連線 · 點按恢復沙箱",
   openWithDefaultApp: "用預設 App 打開",
+  previewInBrowser: "在瀏覽器預覽",
   mdPlaceholder: "開始輸入…",
   mdConflictTitle: "磁碟上的檔案已被外部修改",
   mdKeepMine: "保留我的版本",
@@ -548,6 +550,7 @@ const en: Dict = {
   allowedTemp:
     "External requests temporarily allowed · Click to restore sandbox",
   openWithDefaultApp: "Open with Default App",
+  previewInBrowser: "Preview in Browser",
   mdPlaceholder: "Start writing…",
   mdConflictTitle: "This file was changed on disk",
   mdKeepMine: "Keep mine",
@@ -787,6 +790,7 @@ const ja: Dict = {
   blockedN: "サンドボックスが外部リクエストを {n} 件ブロック · 今回のみ許可",
   allowedTemp: "外部リクエストを一時許可中 · クリックでサンドボックスに戻す",
   openWithDefaultApp: "デフォルトのアプリで開く",
+  previewInBrowser: "ブラウザでプレビュー",
   mdPlaceholder: "入力を始める…",
   mdConflictTitle: "このファイルはディスク上で変更されました",
   mdKeepMine: "自分の版を保持",
@@ -1019,6 +1023,7 @@ const ko: Dict = {
   blockedN: "샌드박스가 외부 요청 {n}건을 차단 · 이번만 허용",
   allowedTemp: "외부 요청 임시 허용 중 · 클릭하여 샌드박스 복원",
   openWithDefaultApp: "기본 앱으로 열기",
+  previewInBrowser: "브라우저에서 미리보기",
   mdPlaceholder: "입력을 시작하세요…",
   mdConflictTitle: "이 파일이 디스크에서 변경되었습니다",
   mdKeepMine: "내 버전 유지",
@@ -1259,6 +1264,7 @@ const es: Dict = {
   allowedTemp:
     "Peticiones externas permitidas temporalmente · Clic para restaurar el sandbox",
   openWithDefaultApp: "Abrir con la app predeterminada",
+  previewInBrowser: "Previsualizar en el navegador",
   mdPlaceholder: "Empieza a escribir…",
   mdConflictTitle: "Este archivo cambió en el disco",
   mdKeepMine: "Conservar la mía",

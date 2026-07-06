@@ -151,11 +151,17 @@ export default function TitleBar() {
           )}
 
           <button
-            onClick={() => api.openInBrowser(viewer.id).catch(() => {})}
+            onClick={() =>
+              isHdoc(viewer.fileName)
+                ? api.previewHdoc(viewer.id).catch(() => {})
+                : api.openInBrowser(viewer.id).catch(() => {})
+            }
             title={
-              isMd(viewer.fileName) || isHdoc(viewer.fileName)
-                ? t("openWithDefaultApp")
-                : t("openInBrowser")
+              isHdoc(viewer.fileName)
+                ? t("previewInBrowser")
+                : isMd(viewer.fileName)
+                  ? t("openWithDefaultApp")
+                  : t("openInBrowser")
             }
             className="relative z-[1] grid h-8 w-8 place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
           >

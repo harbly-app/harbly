@@ -503,11 +503,17 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
               <MItem
                 icon={<ExternalLink className="h-3.5 w-3.5" />}
                 label={
-                  isMd(a.fileName) || isHdoc(a.fileName)
-                    ? t("openWithDefaultApp")
-                    : t("openInBrowser")
+                  isHdoc(a.fileName)
+                    ? t("previewInBrowser")
+                    : isMd(a.fileName)
+                      ? t("openWithDefaultApp")
+                      : t("openInBrowser")
                 }
-                onClick={() => api.openInBrowser(a.id).catch(() => {})}
+                onClick={() =>
+                  isHdoc(a.fileName)
+                    ? api.previewHdoc(a.id).catch(() => {})
+                    : api.openInBrowser(a.id).catch(() => {})
+                }
               />
               <MItem
                 icon={<FolderOpen className="h-3.5 w-3.5" />}
