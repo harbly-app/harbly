@@ -81,11 +81,25 @@ const svg = (body: string) =>
 const textIcon = (label: string) =>
   `<svg viewBox="0 0 24 24"><text x="12" y="16.5" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">${label}</text></svg>`;
 
+/** Transform the current block; when the command doesn't apply (e.g. turning
+ * a heading into a list), fall back to inserting a fresh block — a palette
+ * click must never be a silent no-op. */
 const transform =
-  (cmd: (view: EditorView) => boolean) => (view: EditorView) => {
-    cmd(view);
+  (cmd: (view: EditorView) => boolean, mk: () => PMNode) =>
+  (view: EditorView) => {
+    if (!cmd(view)) {
+      insertTopLevel(view, mk());
+      return;
+    }
     view.focus();
   };
+
+const mkHeading = (level: number) => () => n.heading.create({ level });
+const mkBullet = () =>
+  n.bullet_list.create(null, n.list_item.create(null, p()));
+const mkNumbered = () =>
+  n.ordered_list.create(null, n.list_item.create(null, p()));
+const mkCode = () => n.code_block.create();
 
 export function hdocItems(): HdocItem[] {
   return [
@@ -94,30 +108,33 @@ export function hdocItems(): HdocItem[] {
       labelKey: "insH1",
       group: "basic",
       icon: textIcon("H1"),
-      run: transform((v) =>
-        setBlockType(n.heading, { level: 1 })(v.state, v.dispatch),
+      run: transform(
+        (v) => setBlockType(n.heading, { level: 1 })(v.state, v.dispatch),
+        mkHeading(1),
       ),
-      make: () => n.heading.create({ level: 1 }),
+      make: mkHeading(1),
     },
     {
       key: "h2",
       labelKey: "insH2",
       group: "basic",
       icon: textIcon("H2"),
-      run: transform((v) =>
-        setBlockType(n.heading, { level: 2 })(v.state, v.dispatch),
+      run: transform(
+        (v) => setBlockType(n.heading, { level: 2 })(v.state, v.dispatch),
+        mkHeading(2),
       ),
-      make: () => n.heading.create({ level: 2 }),
+      make: mkHeading(2),
     },
     {
       key: "h3",
       labelKey: "insH3",
       group: "basic",
       icon: textIcon("H3"),
-      run: transform((v) =>
-        setBlockType(n.heading, { level: 3 })(v.state, v.dispatch),
+      run: transform(
+        (v) => setBlockType(n.heading, { level: 3 })(v.state, v.dispatch),
+        mkHeading(3),
       ),
-      make: () => n.heading.create({ level: 3 }),
+      make: mkHeading(3),
     },
     {
       key: "bullet",
@@ -126,8 +143,11 @@ export function hdocItems(): HdocItem[] {
       icon: svg(
         '<path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/>',
       ),
-      run: transform((v) => wrapInList(n.bullet_list)(v.state, v.dispatch)),
-      make: () => n.bullet_list.create(null, n.list_item.create(null, p())),
+      run: transform(
+        (v) => wrapInList(n.bullet_list)(v.state, v.dispatch),
+        mkBullet,
+      ),
+      make: mkBullet,
     },
     {
       key: "numbered",
@@ -136,8 +156,11 @@ export function hdocItems(): HdocItem[] {
       icon: svg(
         '<path d="M10 6h11M10 12h11M10 18h11"/><path d="M3 5.5 4.5 4v4M3.5 14h2l-2 3h2" stroke-width="1.4"/>',
       ),
-      run: transform((v) => wrapInList(n.ordered_list)(v.state, v.dispatch)),
-      make: () => n.ordered_list.create(null, n.list_item.create(null, p())),
+      run: transform(
+        (v) => wrapInList(n.ordered_list)(v.state, v.dispatch),
+        mkNumbered,
+      ),
+      make: mkNumbered,
     },
     {
       key: "code",
@@ -146,8 +169,11 @@ export function hdocItems(): HdocItem[] {
       icon: svg(
         '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
       ),
-      run: transform((v) => setBlockType(n.code_block)(v.state, v.dispatch)),
-      make: () => n.code_block.create(),
+      run: transform(
+        (v) => setBlockType(n.code_block)(v.state, v.dispatch),
+        mkCode,
+      ),
+      make: mkCode,
     },
     {
       key: "table",

@@ -600,3 +600,14 @@ h-figure .hd-fields {
 .hd-palette-item:active {
   cursor: grabbing;
 }
+
+/* Editor-only affordance: an empty column is otherwise invisible (no border,
+   no background) — show dashed bounds while editing; the rendered page and
+   baked exports are untouched. */
+.hdoc-editor h-column {
+  outline: 1.5px dashed var(--hd-line);
+  outline-offset: -1.5px;
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-height: 2.8em;
+}
