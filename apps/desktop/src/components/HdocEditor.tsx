@@ -1,4 +1,4 @@
-import { RefreshCw } from "lucide-react";
+import { PanelLeft, RefreshCw } from "lucide-react";
 import { baseKeymap } from "prosemirror-commands";
 import { dropCursor } from "prosemirror-dropcursor";
 import { gapCursor } from "prosemirror-gapcursor";
@@ -44,11 +44,19 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
   const [conflict, setConflict] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
   const [theme, setTheme] = useState("paper");
+  const [layout, setLayout] = useState("article");
+  const [headings, setHeadings] = useState<HeadingRef[]>([]);
   const actions = useRef<{
     reload: () => void;
     keepMine: () => void;
     setTheme: (v: string) => void;
-  }>({ reload: () => {}, keepMine: () => {}, setTheme: () => {} });
+    setLayout: (v: string) => void;
+  }>({
+    reload: () => {},
+    keepMine: () => {},
+    setTheme: () => {},
+    setLayout: () => {},
+  });
 
   useEffect(() => {
     const id = asset.id;
@@ -67,6 +75,9 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
     let saveChain: Promise<void> = Promise.resolve();
 
     const plugins = [
+      // The slash menu must precede every keymap: while it is open it owns
+      // Enter / arrows / Backspace, which the keymaps would otherwise consume.
+      slashMenu(),
       hdocInputRules(),
       hdocKeymap(),
       keymap({ "Mod-z": undo, "Shift-Mod-z": redo, "Mod-y": redo }),
@@ -75,10 +86,22 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
       gapCursor(),
       history(),
       tableEditing(),
-      slashMenu(),
       dragHandle(),
       hdocPlaceholders(),
     ];
+
+    // Mirror document-level state (theme/layout attrs, heading outline) onto
+    // the mount element and React — called on build, reload and every dispatch.
+    const reflectDoc = (doc: EditorState["doc"]) => {
+      const th = String(doc.attrs.theme ?? "paper");
+      hdocEl?.setAttribute("theme", th);
+      setTheme(th);
+      const la = String(doc.attrs.layout ?? "article");
+      if (la === "article") hdocEl?.removeAttribute("layout");
+      else hdocEl?.setAttribute("layout", la);
+      setLayout(la);
+      setHeadings(collectHeadings(doc));
+    };
 
     const buildView = (doc: EditorState["doc"]): EditorView | null => {
       const wrap = wrapEl.current;
@@ -95,9 +118,7 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
             if (!view) return;
             const newState = view.state.apply(trx);
             view.updateState(newState);
-            const th = String(newState.doc.attrs.theme ?? "paper");
-            hdocEl?.setAttribute("theme", th);
-            setTheme(th);
+            reflectDoc(newState.doc);
             if (trx.docChanged && ready.v) {
               dirty.v = true;
               scheduleSave();
@@ -105,8 +126,11 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
           },
         },
       );
-      hdocEl.setAttribute("theme", String(doc.attrs.theme ?? "paper"));
-      setTheme(String(doc.attrs.theme ?? "paper"));
+      reflectDoc(doc);
+      if (import.meta.env.DEV) {
+        // Reachable handle for the browser dev harness (dev-hdoc.html)
+        (hdocEl as HTMLElement & { __pmView?: EditorView }).__pmView = v;
+      }
       return v;
     };
 
@@ -153,11 +177,7 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
       setUnsupported(false);
       if (view) {
         view.updateState(EditorState.create({ doc: parsed.doc, plugins }));
-        hdocEl?.setAttribute(
-          "theme",
-          String(parsed.doc.attrs.theme ?? "paper"),
-        );
-        setTheme(String(parsed.doc.attrs.theme ?? "paper"));
+        reflectDoc(parsed.doc);
       } else {
         view = buildView(parsed.doc);
         if (!view) return false;
@@ -198,6 +218,10 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
       setTheme: (v: string) => {
         if (!view) return;
         view.dispatch(view.state.tr.setDocAttribute("theme", v));
+      },
+      setLayout: (v: string) => {
+        if (!view) return;
+        view.dispatch(view.state.tr.setDocAttribute("layout", v));
       },
     };
 
@@ -300,18 +324,82 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
         viewRef={pmViewRef}
         t={t}
         themeSel={
-          <ThemeSelect
-            theme={theme}
-            t={t}
-            onChange={(v) => actions.current.setTheme(v)}
-          />
+          <>
+            <ThemeSelect
+              theme={theme}
+              t={t}
+              onChange={(v) => actions.current.setTheme(v)}
+            />
+            <button
+              onClick={() =>
+                actions.current.setLayout(
+                  layout === "docs" ? "article" : "docs",
+                )
+              }
+              title={t("hdocLayoutToc")}
+              className={`grid h-7 w-7 shrink-0 place-items-center rounded-ctl border border-line transition ${
+                layout === "docs"
+                  ? "bg-primary/10 text-primary"
+                  : "bg-card text-sub hover:text-ink"
+              }`}
+            >
+              <PanelLeft className="h-3.5 w-3.5" />
+            </button>
+          </>
         }
       />
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div ref={wrapEl} className="hdoc-wrap relative min-h-full" />
+      <div className="flex min-h-0 flex-1">
+        {layout === "docs" && (
+          <aside className="w-56 shrink-0 overflow-y-auto border-r border-line px-2.5 py-3">
+            <div className="px-2 pb-1 text-[10.5px] font-bold text-sub">
+              {t("insToc")}
+            </div>
+            {headings.map((h) => (
+              <button
+                key={h.pos}
+                onClick={() => {
+                  const v = pmViewRef.current;
+                  const dom = v?.nodeDOM(h.pos);
+                  if (dom instanceof HTMLElement)
+                    dom.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+                className={`block w-full truncate rounded-md py-1 pr-2 text-left text-[12px] text-sub transition hover:bg-side hover:text-ink ${
+                  h.level === 1 ? "pl-2" : h.level === 2 ? "pl-5" : "pl-8"
+                }`}
+              >
+                {h.text || "…"}
+              </button>
+            ))}
+          </aside>
+        )}
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+          <div ref={wrapEl} className="hdoc-wrap relative min-h-full" />
+        </div>
       </div>
     </main>
   );
+}
+
+interface HeadingRef {
+  text: string;
+  level: number;
+  pos: number;
+}
+
+/** Flat outline of every heading (any nesting depth) with its document position. */
+function collectHeadings(doc: EditorState["doc"]): HeadingRef[] {
+  const out: HeadingRef[] = [];
+  doc.descendants((node, pos) => {
+    if (node.type.name === "heading") {
+      out.push({
+        text: node.textContent,
+        level: node.attrs.level as number,
+        pos,
+      });
+    }
+    return true;
+  });
+  return out;
 }
 
 /** Document theme is a property of the file, not the app appearance. */
