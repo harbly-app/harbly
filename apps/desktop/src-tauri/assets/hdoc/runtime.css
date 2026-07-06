@@ -112,18 +112,31 @@ h-doc a {
 h-doc a:hover {
   text-decoration: underline;
 }
+/* List markers are declared explicitly: inside the app the editor lives under
+   Tailwind's preflight (ul/ol reset to list-style:none), and these h-doc-scoped
+   rules must win in both the editor and the standalone render. */
 h-doc ul,
 h-doc ol {
   margin-top: 0;
   margin-bottom: 1em;
   padding-left: 1.6em;
 }
+h-doc ul {
+  list-style: disc;
+}
+h-doc ol {
+  list-style: decimal;
+}
 h-doc li {
+  display: list-item;
   margin: 0.25em 0;
 }
 h-doc li > ul,
 h-doc li > ol {
   margin: 0.25em 0;
+}
+h-doc li > ul {
+  list-style: circle;
 }
 h-doc blockquote {
   margin: 0 auto 1em;
@@ -155,7 +168,10 @@ h-doc pre code {
   padding: 0;
   font-size: 0.86em;
 }
+/* inline-block explicitly: Tailwind's preflight makes img display:block inside
+   the app, which would break h-figure's text-align centering in the editor */
 h-doc img {
+  display: inline-block;
   max-width: 100%;
   border-radius: 8px;
 }
