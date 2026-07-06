@@ -323,29 +323,14 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
       <InsertToolbar
         viewRef={pmViewRef}
         t={t}
+        layout={layout}
+        onLayout={(v) => actions.current.setLayout(v)}
         themeSel={
-          <>
-            <ThemeSelect
-              theme={theme}
-              t={t}
-              onChange={(v) => actions.current.setTheme(v)}
-            />
-            <button
-              onClick={() =>
-                actions.current.setLayout(
-                  layout === "docs" ? "article" : "docs",
-                )
-              }
-              title={t("hdocLayoutToc")}
-              className={`grid h-7 w-7 shrink-0 place-items-center rounded-ctl border border-line transition ${
-                layout === "docs"
-                  ? "bg-primary/10 text-primary"
-                  : "bg-card text-sub hover:text-ink"
-              }`}
-            >
-              <PanelLeft className="h-3.5 w-3.5" />
-            </button>
-          </>
+          <ThemeSelect
+            theme={theme}
+            t={t}
+            onChange={(v) => actions.current.setTheme(v)}
+          />
         }
       />
       <div className="flex min-h-0 flex-1">
@@ -441,10 +426,14 @@ function ThemeSelect({
 function InsertToolbar({
   viewRef,
   t,
+  layout,
+  onLayout,
   themeSel,
 }: {
   viewRef: React.RefObject<EditorView | null>;
   t: TFn;
+  layout: string;
+  onLayout: (v: string) => void;
   themeSel: React.ReactNode;
 }) {
   const items = hdocItems();
@@ -497,6 +486,19 @@ function InsertToolbar({
             ))}
         </ReactFragment>
       ))}
+      {/* layout section: page-level modes, grouped with the blocks on the left */}
+      <div className="mx-1.5 h-4 w-px shrink-0 bg-line" />
+      <button
+        onClick={() => onLayout(layout === "docs" ? "article" : "docs")}
+        title={t("hdocLayoutToc")}
+        className={`grid h-7 w-7 shrink-0 place-items-center rounded-ctl transition ${
+          layout === "docs"
+            ? "bg-primary/10 text-primary"
+            : "text-sub hover:bg-side hover:text-ink"
+        }`}
+      >
+        <PanelLeft className="h-3.5 w-3.5" />
+      </button>
       <div className="min-w-3 flex-1" />
       {themeSel}
     </div>
