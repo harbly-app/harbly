@@ -7,6 +7,7 @@ import {
   ExternalLink,
   Eye,
   FileCode2,
+  FileDown,
   FileText,
   FolderInput,
   FolderOpen,
@@ -478,6 +479,13 @@ function FileRow(props: {
             label={t("exportCopy")}
             onClick={() => st().doExportAsset(f.id)}
           />
+          {isHdoc(f.name) && (
+            <MItem
+              icon={<FileDown className="h-3.5 w-3.5" />}
+              label={t("exportHdocCmd")}
+              onClick={() => st().doExportHdoc(f.id)}
+            />
+          )}
           <MSep />
           <MItem
             danger

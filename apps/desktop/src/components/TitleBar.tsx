@@ -1,7 +1,6 @@
 import {
   ChevronLeft,
   ExternalLink,
-  FileDown,
   FolderOpen,
   MoveHorizontal,
   PanelLeft,
@@ -32,7 +31,6 @@ export default function TitleBar() {
   const toggleMdWide = useStore((s) => s.toggleMdWide);
   const aiOpen = useStore((s) => s.aiOpen);
   const toggleAi = useStore((s) => s.toggleAi);
-  const doExportHdoc = useStore((s) => s.doExportHdoc);
   const t = makeT(useStore((s) => s.lang));
   const [scanning, setScanning] = useState(false);
 
@@ -139,16 +137,6 @@ export default function TitleBar() {
           >
             <Sparkles className="h-4 w-4" />
           </button>
-
-          {isHdoc(viewer.fileName) && (
-            <button
-              onClick={() => doExportHdoc(viewer.id)}
-              title={t("exportHdocCmd")}
-              className="relative z-[1] grid h-8 w-8 place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
-            >
-              <FileDown className="h-4 w-4" />
-            </button>
-          )}
 
           <button
             onClick={() =>
