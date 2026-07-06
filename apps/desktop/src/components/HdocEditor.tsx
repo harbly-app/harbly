@@ -1,4 +1,4 @@
-import { PanelTop, PanelTopClose, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { baseKeymap } from "prosemirror-commands";
 import { dropCursor } from "prosemirror-dropcursor";
 import { gapCursor } from "prosemirror-gapcursor";
@@ -44,15 +44,6 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
   const [conflict, setConflict] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
   const [theme, setTheme] = useState("paper");
-  const [palette, setPalette] = useState(
-    localStorage.getItem("harbly.hdocPalette") !== "0",
-  );
-  const togglePalette = () => {
-    setPalette((v) => {
-      localStorage.setItem("harbly.hdocPalette", v ? "0" : "1");
-      return !v;
-    });
-  };
   const actions = useRef<{
     reload: () => void;
     keepMine: () => void;
@@ -305,40 +296,19 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
           </button>
         </div>
       )}
-      {palette && (
-        <InsertToolbar
-          viewRef={pmViewRef}
-          t={t}
-          themeSel={
-            <ThemeSelect
-              theme={theme}
-              t={t}
-              onChange={(v) => actions.current.setTheme(v)}
-            />
-          }
-          onHide={togglePalette}
-        />
-      )}
-      <div className="relative min-h-0 flex-1">
-        {!palette && (
-          <div className="absolute top-2 right-3 z-10 flex items-center gap-1.5">
-            <ThemeSelect
-              theme={theme}
-              t={t}
-              onChange={(v) => actions.current.setTheme(v)}
-            />
-            <button
-              onClick={togglePalette}
-              title={t("hdocInsertPanel")}
-              className="grid h-7 w-7 place-items-center rounded-ctl border border-line bg-card text-sub transition hover:text-ink"
-            >
-              <PanelTop className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        )}
-        <div className="h-full overflow-y-auto">
-          <div ref={wrapEl} className="hdoc-wrap relative min-h-full" />
-        </div>
+      <InsertToolbar
+        viewRef={pmViewRef}
+        t={t}
+        themeSel={
+          <ThemeSelect
+            theme={theme}
+            t={t}
+            onChange={(v) => actions.current.setTheme(v)}
+          />
+        }
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div ref={wrapEl} className="hdoc-wrap relative min-h-full" />
       </div>
     </main>
   );
@@ -384,12 +354,10 @@ function InsertToolbar({
   viewRef,
   t,
   themeSel,
-  onHide,
 }: {
   viewRef: React.RefObject<EditorView | null>;
   t: TFn;
   themeSel: React.ReactNode;
-  onHide: () => void;
 }) {
   const items = hdocItems();
   const groups: HdocItem["group"][] = ["basic", "component"];
@@ -443,13 +411,6 @@ function InsertToolbar({
       ))}
       <div className="min-w-3 flex-1" />
       {themeSel}
-      <button
-        onClick={onHide}
-        title={t("hdocInsertPanel")}
-        className="grid h-7 w-7 shrink-0 place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
-      >
-        <PanelTopClose className="h-3.5 w-3.5" />
-      </button>
     </div>
   );
 }

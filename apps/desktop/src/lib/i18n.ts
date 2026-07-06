@@ -119,7 +119,6 @@ const zhCN: Dict = {
   insToc: "目录",
   slashBasic: "基础",
   slashComponents: "组件",
-  hdocInsertPanel: "组件栏",
   mdEditorWidth: "编辑器宽度",
   // Dialogs
   moveTitle: "移动「{name}」到…",
@@ -351,7 +350,6 @@ const zhTW: Dict = {
   insToc: "目錄",
   slashBasic: "基礎",
   slashComponents: "組件",
-  hdocInsertPanel: "組件欄",
   mdEditorWidth: "編輯器寬度",
   moveTitle: "移動「{name}」到…",
   moveHint: "移動 = 磁碟上真實的 mv · 同名自動加後綴 · 可 ⌘Z 還原",
@@ -583,7 +581,6 @@ const en: Dict = {
   insToc: "Table of contents",
   slashBasic: "Basic",
   slashComponents: "Components",
-  hdocInsertPanel: "Components panel",
   mdEditorWidth: "Editor width",
   moveTitle: "Move “{name}” to…",
   moveHint:
@@ -822,7 +819,6 @@ const ja: Dict = {
   insToc: "目次",
   slashBasic: "基本",
   slashComponents: "コンポーネント",
-  hdocInsertPanel: "コンポーネントパネル",
   mdEditorWidth: "エディタの幅",
   moveTitle: "「{name}」の移動先…",
   moveHint:
@@ -1054,7 +1050,6 @@ const ko: Dict = {
   insToc: "목차",
   slashBasic: "기본",
   slashComponents: "구성 요소",
-  hdocInsertPanel: "구성 요소 패널",
   mdEditorWidth: "편집기 너비",
   moveTitle: "‘{name}’ 이동 위치…",
   moveHint:
@@ -1294,7 +1289,6 @@ const es: Dict = {
   insToc: "Índice",
   slashBasic: "Básicos",
   slashComponents: "Componentes",
-  hdocInsertPanel: "Panel de componentes",
   mdEditorWidth: "Ancho del editor",
   moveTitle: "Trasladar «{name}» a…",
   moveHint:
