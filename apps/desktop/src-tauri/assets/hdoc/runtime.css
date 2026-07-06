@@ -138,6 +138,20 @@ h-doc li > ol {
 h-doc li > ul {
   list-style: circle;
 }
+/* Paragraphs as structural children: the editor's document model always nests
+   a real <p> inside li/th/td (serialized files inline single paragraphs), so
+   the default paragraph margin would double the spacing there — keep them
+   flush and only space out consecutive paragraphs. */
+h-doc li > p,
+h-doc th > p,
+h-doc td > p {
+  margin: 0;
+}
+h-doc li > p + p,
+h-doc th > p + p,
+h-doc td > p + p {
+  margin-top: 0.8em;
+}
 h-doc blockquote {
   margin: 0 auto 1em;
   padding: 0.2em 1.1em;
