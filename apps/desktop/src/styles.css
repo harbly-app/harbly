@@ -578,3 +578,10 @@ h-figure .hd-fields {
   padding: 10px 12px;
   min-height: 2.8em;
 }
+
+/* Editor: the docs layout's fixed sidenav only exists in rendered output; the
+   editor shows its own clickable outline panel instead, so the canvas keeps
+   the normal reading-column padding. */
+.hdoc-editor h-doc[layout="docs"] {
+  padding-left: 28px;
+}

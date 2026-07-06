@@ -156,6 +156,22 @@ describe("hdoc round-trip", () => {
     expect(p.doc.attrs.theme).toBe("night");
   });
 
+  it("round-trips the docs layout attribute; default stays implicit", () => {
+    const p = parseHdoc(
+      `<h-doc v="1" theme="paper" layout="docs"><h1>t</h1></h-doc>`,
+    );
+    expect(p.ok).toBe(true);
+    if (!p.ok) return;
+    expect(p.doc.attrs.layout).toBe("docs");
+    const s = serializeHdoc(p.doc);
+    expect(s).toContain('layout="docs"');
+    // default layout carries no attribute noise
+    const d = parseHdoc(`<h-doc v="1"><p>x</p></h-doc>`);
+    expect(d.ok).toBe(true);
+    if (!d.ok) return;
+    expect(serializeHdoc(d.doc)).not.toContain("layout=");
+  });
+
   it("preserves unknown theme values (forward compatibility)", () => {
     const p = parseHdoc(`<h-doc v="2" theme="future"><p>x</p></h-doc>`);
     expect(p.ok).toBe(true);

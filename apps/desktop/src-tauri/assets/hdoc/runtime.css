@@ -471,17 +471,62 @@ h-toc::before {
   font-weight: 680;
   margin-bottom: 0.3em;
 }
-h-toc .hd-toc-list {
+/* Generated contents lists (inside h-toc blocks and the docs-layout sidenav) */
+h-doc .hd-toc-list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
-h-toc .hd-toc-list li {
+h-doc .hd-toc-list li {
   margin: 0.15em 0;
 }
-h-toc .hd-toc-h2 {
+h-doc .hd-toc-h2 {
   padding-left: 1.1em;
 }
-h-toc .hd-toc-h3 {
+h-doc .hd-toc-h3 {
   padding-left: 2.2em;
+}
+
+/* ---------- "docs" layout: fixed side table of contents ---------- */
+h-doc[layout="docs"] {
+  padding-left: 316px;
+}
+h-doc > .hd-sidenav {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 288px;
+  max-width: none;
+  margin: 0;
+  overflow-y: auto;
+  padding: 40px 24px 48px;
+  background: var(--hd-soft);
+  border-right: 1px solid var(--hd-line);
+  font-size: 0.9em;
+}
+.hd-sidenav .hd-sidenav-t {
+  font-weight: 680;
+  margin-bottom: 0.6em;
+}
+.hd-sidenav a {
+  color: var(--hd-sub);
+}
+.hd-sidenav a:hover {
+  color: var(--hd-accent);
+  text-decoration: none;
+}
+@media (max-width: 900px) {
+  h-doc[layout="docs"] {
+    padding-left: 28px;
+  }
+  h-doc > .hd-sidenav {
+    position: static;
+    width: auto;
+    max-width: 46rem;
+    margin: 0 auto 1.6em;
+    padding: 14px 18px;
+    border: 1px solid var(--hd-line);
+    border-radius: var(--hd-radius);
+  }
 }

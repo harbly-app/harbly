@@ -29,11 +29,12 @@ export function parseHdoc(text: string): ParsedHdoc {
     return { ok: false, reason: "unsupported", tags: [...bad] };
   }
 
-  // Unknown theme values are preserved as-is (forward compatibility): the CSS
-  // simply falls back to the default token set.
+  // Unknown theme/layout values are preserved as-is (forward compatibility):
+  // the CSS simply falls back to the default rendering.
   const attrs = {
     theme: root.getAttribute("theme") ?? "paper",
     v: root.getAttribute("v") ?? "1",
+    layout: root.getAttribute("layout") ?? "article",
   };
   try {
     const doc = PMDOMParser.fromSchema(hdocSchema).parse(root, {

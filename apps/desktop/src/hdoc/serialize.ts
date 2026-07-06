@@ -239,10 +239,13 @@ function wrapList(out: string[], ind: string, tag: string, node: PMNode) {
 
 export function serializeHdoc(doc: PMNode): string {
   const out: string[] = [];
+  const layout = doc.attrs.layout as string;
   out.push(
     openTag("h-doc", {
       v: (doc.attrs.v as string) || "1",
       theme: doc.attrs.theme as string,
+      // default layout stays implicit so plain documents carry no noise
+      layout: layout === "article" ? "" : layout,
     }),
   );
   doc.forEach((child) => block(child, "  ", out));

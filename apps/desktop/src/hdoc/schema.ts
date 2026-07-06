@@ -52,7 +52,13 @@ const container = (tag: string, extraAttrs: string[] = []): NodeSpec => ({
 const nodes: Record<string, NodeSpec> = {
   doc: {
     content: "block+",
-    attrs: { theme: { default: "paper" }, v: { default: "1" } },
+    attrs: {
+      theme: { default: "paper" },
+      v: { default: "1" },
+      // "article" = single reading column; "docs" = fixed side table of
+      // contents generated from the headings (documentation-site layout)
+      layout: { default: "article" },
+    },
   },
 
   paragraph: {

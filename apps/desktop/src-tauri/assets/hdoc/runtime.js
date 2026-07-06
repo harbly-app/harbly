@@ -45,8 +45,7 @@
   heads.forEach(function (h, i) {
     if (!h.id) h.id = "hd-" + i;
   });
-  Array.prototype.forEach.call(doc.querySelectorAll("h-toc"), function (toc) {
-    toc.setAttribute("data-label", window.__HDOC_TOC_LABEL || "Contents");
+  var buildTocList = function () {
     var ol = document.createElement("ol");
     ol.className = "hd-toc-list";
     heads.forEach(function (h) {
@@ -58,8 +57,25 @@
       li.appendChild(a);
       ol.appendChild(li);
     });
-    toc.appendChild(ol);
+    return ol;
+  };
+  Array.prototype.forEach.call(doc.querySelectorAll("h-toc"), function (toc) {
+    toc.setAttribute("data-label", window.__HDOC_TOC_LABEL || "Contents");
+    toc.appendChild(buildTocList());
   });
+
+  // "docs" layout: a fixed side navigation generated from the headings.
+  // Lives inside h-doc so the theme tokens apply; CSS pins it to the left.
+  if (doc.getAttribute("layout") === "docs" && heads.length > 0) {
+    var nav = document.createElement("nav");
+    nav.className = "hd-sidenav";
+    var title = document.createElement("div");
+    title.className = "hd-sidenav-t";
+    title.textContent = window.__HDOC_TOC_LABEL || "Contents";
+    nav.appendChild(title);
+    nav.appendChild(buildTocList());
+    doc.insertBefore(nav, doc.firstChild);
+  }
 
   // Collapsible sections: materialize the summary row from the attribute.
   Array.prototype.forEach.call(doc.querySelectorAll("h-details"), function (d) {
