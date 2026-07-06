@@ -568,39 +568,6 @@ h-figure .hd-fields {
   color: var(--color-primary);
 }
 
-/* Insert palette (right rail): click to insert, drag to place */
-.hd-palette {
-  width: 190px;
-  padding: 8px 7px 16px;
-  background: var(--color-paper);
-}
-.hd-palette-group {
-  padding: 8px 9px 4px;
-  font-size: 10.5px;
-  font-weight: 700;
-  color: var(--color-sub);
-}
-.hd-palette-item {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 6px 9px;
-  border-radius: 8px;
-  font-size: 12px;
-  color: var(--color-ink);
-  cursor: grab;
-  transition: background 0.12s;
-}
-.hd-palette-item:hover {
-  background: var(--color-side);
-}
-.hd-palette-item:hover .hd-ico {
-  color: var(--color-primary);
-}
-.hd-palette-item:active {
-  cursor: grabbing;
-}
-
 /* Editor-only affordance: an empty column is otherwise invisible (no border,
    no background) — show dashed bounds while editing; the rendered page and
    baked exports are untouched. */

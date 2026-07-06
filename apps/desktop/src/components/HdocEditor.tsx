@@ -1,4 +1,4 @@
-import { PanelRight, RefreshCw } from "lucide-react";
+import { PanelTop, PanelTopClose, RefreshCw } from "lucide-react";
 import { baseKeymap } from "prosemirror-commands";
 import { dropCursor } from "prosemirror-dropcursor";
 import { gapCursor } from "prosemirror-gapcursor";
@@ -8,7 +8,7 @@ import { DOMSerializer, Fragment, Slice } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
 import { tableEditing } from "prosemirror-tables";
 import { EditorView } from "prosemirror-view";
-import { useEffect, useRef, useState } from "react";
+import { Fragment as ReactFragment, useEffect, useRef, useState } from "react";
 import { api, assetUrl } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import type { TFn } from "../lib/i18n";
@@ -305,65 +305,94 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
           </button>
         </div>
       )}
-      <div className="flex min-h-0 flex-1">
-        <div className="relative min-h-0 min-w-0 flex-1">
-          {/* Document theme is a property of the file, not the app appearance */}
+      {palette && (
+        <InsertToolbar
+          viewRef={pmViewRef}
+          t={t}
+          themeSel={
+            <ThemeSelect
+              theme={theme}
+              t={t}
+              onChange={(v) => actions.current.setTheme(v)}
+            />
+          }
+          onHide={togglePalette}
+        />
+      )}
+      <div className="relative min-h-0 flex-1">
+        {!palette && (
           <div className="absolute top-2 right-3 z-10 flex items-center gap-1.5">
-            <select
-              value={theme}
-              onChange={(e) => actions.current.setTheme(e.target.value)}
-              title={t("hdocTheme")}
-              className="rounded-ctl border border-line bg-card px-2 py-1 text-[11px] text-sub transition outline-none hover:text-ink"
-            >
-              {THEMES.map((v) => (
-                <option key={v} value={v}>
-                  {t(
-                    v === "paper"
-                      ? "themePaper"
-                      : v === "sepia"
-                        ? "themeSepia"
-                        : "themeNight",
-                  )}
-                </option>
-              ))}
-            </select>
+            <ThemeSelect
+              theme={theme}
+              t={t}
+              onChange={(v) => actions.current.setTheme(v)}
+            />
             <button
               onClick={togglePalette}
               title={t("hdocInsertPanel")}
-              className={`grid h-7 w-7 place-items-center rounded-ctl border border-line transition ${
-                palette
-                  ? "bg-primary/10 text-primary"
-                  : "bg-card text-sub hover:text-ink"
-              }`}
+              className="grid h-7 w-7 place-items-center rounded-ctl border border-line bg-card text-sub transition hover:text-ink"
             >
-              <PanelRight className="h-3.5 w-3.5" />
+              <PanelTop className="h-3.5 w-3.5" />
             </button>
           </div>
-          <div className="h-full overflow-y-auto">
-            <div ref={wrapEl} className="hdoc-wrap relative min-h-full" />
-          </div>
+        )}
+        <div className="h-full overflow-y-auto">
+          <div ref={wrapEl} className="hdoc-wrap relative min-h-full" />
         </div>
-        {palette && <InsertPalette viewRef={pmViewRef} t={t} />}
       </div>
     </main>
   );
 }
 
-/** Right-side component rail: click inserts at the cursor, drag places the
- * block exactly where it drops — the drag hands ProseMirror a ready slice via
- * `view.dragging`, and its own drop logic + dropcursor do the rest. */
-function InsertPalette({
+/** Document theme is a property of the file, not the app appearance. */
+function ThemeSelect({
+  theme,
+  t,
+  onChange,
+}: {
+  theme: string;
+  t: TFn;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <select
+      value={theme}
+      onChange={(e) => onChange(e.target.value)}
+      title={t("hdocTheme")}
+      className="rounded-ctl border border-line bg-card px-2 py-1 text-[11px] text-sub transition outline-none hover:text-ink"
+    >
+      {THEMES.map((v) => (
+        <option key={v} value={v}>
+          {t(
+            v === "paper"
+              ? "themePaper"
+              : v === "sepia"
+                ? "themeSepia"
+                : "themeNight",
+          )}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** Insert toolbar across the editor top: icon buttons (hover for the name),
+ * click inserts at the cursor, drag places the block exactly where it drops —
+ * the drag hands ProseMirror a ready slice via `view.dragging`, and its own
+ * drop logic + dropcursor do the rest. */
+function InsertToolbar({
   viewRef,
   t,
+  themeSel,
+  onHide,
 }: {
   viewRef: React.RefObject<EditorView | null>;
   t: TFn;
+  themeSel: React.ReactNode;
+  onHide: () => void;
 }) {
   const items = hdocItems();
-  const groups: { id: HdocItem["group"]; label: string }[] = [
-    { id: "basic", label: t("slashBasic") },
-    { id: "component", label: t("slashComponents") },
-  ];
+  const groups: HdocItem["group"][] = ["basic", "component"];
 
   const onDragStart = (e: React.DragEvent, it: HdocItem) => {
     const v = viewRef.current;
@@ -385,15 +414,16 @@ function InsertPalette({
   };
 
   return (
-    <aside className="hd-palette shrink-0 overflow-y-auto border-l border-line">
-      {groups.map((g) => (
-        <div key={g.id}>
-          <div className="hd-palette-group">{g.label}</div>
+    <div className="flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line bg-paper px-3">
+      {groups.map((g, gi) => (
+        <ReactFragment key={g}>
+          {gi > 0 && <div className="mx-1.5 h-4 w-px shrink-0 bg-line" />}
           {items
-            .filter((it) => it.group === g.id)
+            .filter((it) => it.group === g)
             .map((it) => (
-              <div
+              <button
                 key={it.key}
+                title={t(it.labelKey)}
                 draggable
                 onDragStart={(e) => onDragStart(e, it)}
                 onDragEnd={onDragEnd}
@@ -401,17 +431,25 @@ function InsertPalette({
                   const v = viewRef.current;
                   if (v) it.run(v);
                 }}
-                className="hd-palette-item"
+                className="grid h-7 w-7 shrink-0 cursor-grab place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
               >
                 <span
                   className="hd-ico"
                   dangerouslySetInnerHTML={{ __html: it.icon }}
                 />
-                <span>{t(it.labelKey)}</span>
-              </div>
+              </button>
             ))}
-        </div>
+        </ReactFragment>
       ))}
-    </aside>
+      <div className="min-w-3 flex-1" />
+      {themeSel}
+      <button
+        onClick={onHide}
+        title={t("hdocInsertPanel")}
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-ctl text-sub transition hover:bg-side hover:text-ink"
+      >
+        <PanelTopClose className="h-3.5 w-3.5" />
+      </button>
+    </div>
   );
 }
