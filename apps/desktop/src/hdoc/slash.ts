@@ -1,211 +1,31 @@
 /**
  * Slash insert menu: typing "/" at the start of an (empty or space-preceded)
- * position opens a filterable block palette. The slash itself is never typed
- * into the document; while the menu is open, printable keys build the filter,
- * ↑/↓ navigate, ↵ inserts, Esc cancels. Component blocks insert at the top
- * level (after the current block, or replacing it when it is an empty
- * paragraph); text blocks transform in place.
+ * position opens a filterable block palette fed by the shared item catalog
+ * (items.ts). The slash itself is never typed into the document; while the
+ * menu is open, printable keys build the filter, ↑/↓ navigate (with scroll
+ * follow), ↵ inserts, Esc cancels.
  */
-import { setBlockType } from "prosemirror-commands";
-import type { Node as PMNode } from "prosemirror-model";
-import { Plugin, PluginKey, Selection } from "prosemirror-state";
+import { Plugin, PluginKey } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
-import { wrapInList } from "prosemirror-schema-list";
 import { tr } from "../lib/i18n";
+import { hdocItems } from "./items";
+import type { HdocItem } from "./items";
 import { hdocSchema } from "./schema";
 
-const n = hdocSchema.nodes;
-const p = () => n.paragraph.create();
-
-const fill = (type: (typeof n)[string], attrs?: Record<string, unknown>) =>
-  type.createAndFill(attrs ?? null) ?? type.create(attrs ?? null);
-
-function makeColumns(count: number): PMNode {
-  const cols = Array.from({ length: count }, () => n.column.create(null, p()));
-  return n.columns.create(null, cols);
-}
-
-function makeTable(): PMNode {
-  const cell = (t: (typeof n)[string]) => fill(t);
-  const header = n.table_row.create(null, [
-    cell(n.table_header),
-    cell(n.table_header),
-    cell(n.table_header),
-  ]);
-  const row = () =>
-    n.table_row.create(null, [
-      cell(n.table_cell),
-      cell(n.table_cell),
-      cell(n.table_cell),
-    ]);
-  return n.table.create(null, [header, row(), row()]);
-}
-
-interface SlashItem {
-  key: string;
-  label: () => string;
-  /** "transform": change the current textblock; "insert": add a block node */
-  run: (view: EditorView) => void;
-}
-
-/** Insert a block: replace the current empty top-level paragraph, otherwise
- * append after the current top-level block; cursor lands inside. */
-function insertTopLevel(view: EditorView, node: PMNode) {
-  const { state } = view;
-  const { $from } = state.selection;
-  let t = state.tr;
-  let at: number;
-  if (
-    $from.depth >= 1 &&
-    $from.parent.type === n.paragraph &&
-    $from.parent.content.size === 0 &&
-    $from.depth === 1
-  ) {
-    at = $from.before(1);
-    t = t.replaceRangeWith(at, $from.after(1), node);
-  } else {
-    at = $from.depth >= 1 ? $from.after(1) : state.selection.to;
-    t = t.insert(at, node);
-  }
-  const sel = Selection.near(t.doc.resolve(at + 1), 1);
-  t = t.setSelection(sel).scrollIntoView();
-  view.dispatch(t);
-  view.focus();
-}
-
-function transform(cmd: (view: EditorView) => boolean) {
-  return (view: EditorView) => {
-    cmd(view);
-    view.focus();
-  };
-}
-
-function items(): SlashItem[] {
-  return [
-    {
-      key: "h1",
-      label: () => tr("insH1"),
-      run: transform((v) =>
-        setBlockType(n.heading, { level: 1 })(v.state, v.dispatch),
-      ),
-    },
-    {
-      key: "h2",
-      label: () => tr("insH2"),
-      run: transform((v) =>
-        setBlockType(n.heading, { level: 2 })(v.state, v.dispatch),
-      ),
-    },
-    {
-      key: "h3",
-      label: () => tr("insH3"),
-      run: transform((v) =>
-        setBlockType(n.heading, { level: 3 })(v.state, v.dispatch),
-      ),
-    },
-    {
-      key: "bullet",
-      label: () => tr("insBullet"),
-      run: transform((v) => wrapInList(n.bullet_list)(v.state, v.dispatch)),
-    },
-    {
-      key: "numbered",
-      label: () => tr("insNumbered"),
-      run: transform((v) => wrapInList(n.ordered_list)(v.state, v.dispatch)),
-    },
-    {
-      key: "code",
-      label: () => tr("insCode"),
-      run: transform((v) => setBlockType(n.code_block)(v.state, v.dispatch)),
-    },
-    {
-      key: "callout",
-      label: () => tr("insCallout"),
-      run: (v) => insertTopLevel(v, n.callout.create({ kind: "note" }, p())),
-    },
-    {
-      key: "columns2",
-      label: () => tr("insColumns2"),
-      run: (v) => insertTopLevel(v, makeColumns(2)),
-    },
-    {
-      key: "columns3",
-      label: () => tr("insColumns3"),
-      run: (v) => insertTopLevel(v, makeColumns(3)),
-    },
-    {
-      key: "card",
-      label: () => tr("insCard"),
-      run: (v) => insertTopLevel(v, n.card.create(null, p())),
-    },
-    {
-      key: "steps",
-      label: () => tr("insSteps"),
-      run: (v) =>
-        insertTopLevel(
-          v,
-          n.steps.create(null, [
-            n.step.create(null, p()),
-            n.step.create(null, p()),
-            n.step.create(null, p()),
-          ]),
-        ),
-    },
-    {
-      key: "quote",
-      label: () => tr("insQuote"),
-      run: (v) => insertTopLevel(v, n.quote.create(null, p())),
-    },
-    {
-      key: "stats",
-      label: () => tr("insStats"),
-      run: (v) =>
-        insertTopLevel(
-          v,
-          n.stats.create(null, [
-            n.stat.create(),
-            n.stat.create(),
-            n.stat.create(),
-          ]),
-        ),
-    },
-    {
-      key: "details",
-      label: () => tr("insDetails"),
-      run: (v) => insertTopLevel(v, n.details.create(null, p())),
-    },
-    {
-      key: "image",
-      label: () => tr("insImage"),
-      run: (v) => insertTopLevel(v, n.figure.create(null, n.image.create())),
-    },
-    {
-      key: "table",
-      label: () => tr("insTable"),
-      run: (v) => insertTopLevel(v, makeTable()),
-    },
-    {
-      key: "toc",
-      label: () => tr("insToc"),
-      run: (v) => insertTopLevel(v, n.toc.create()),
-    },
-    {
-      key: "divider",
-      label: () => tr("insDivider"),
-      run: (v) => insertTopLevel(v, n.horizontal_rule.create()),
-    },
-  ];
-}
-
 export const slashKey = new PluginKey("hdoc-slash");
+
+const GROUPS: { id: HdocItem["group"]; labelKey: string }[] = [
+  { id: "basic", labelKey: "slashBasic" },
+  { id: "component", labelKey: "slashComponents" },
+];
 
 export function slashMenu(): Plugin {
   let menu: HTMLDivElement | null = null;
   let open = false;
   let query = "";
   let index = 0;
-  let all: SlashItem[] = [];
-  let filtered: SlashItem[] = [];
+  let all: HdocItem[] = [];
+  let filtered: HdocItem[] = [];
   let viewRef: EditorView | null = null;
 
   const close = () => {
@@ -219,7 +39,7 @@ export function slashMenu(): Plugin {
     const m = menu;
     if (!m) return;
     filtered = all.filter((it) =>
-      it.label().toLowerCase().includes(query.toLowerCase()),
+      tr(it.labelKey).toLowerCase().includes(query.toLowerCase()),
     );
     if (index >= filtered.length) index = Math.max(0, filtered.length - 1);
     m.replaceChildren();
@@ -229,24 +49,40 @@ export function slashMenu(): Plugin {
       q.textContent = `/${query}`;
       m.appendChild(q);
     }
-    filtered.forEach((it, i) => {
-      const row = document.createElement("div");
-      row.className = `hd-slash-item${i === index ? " sel" : ""}`;
-      row.textContent = it.label();
-      row.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        const v = viewRef;
-        close();
-        if (v) it.run(v);
-      });
-      row.addEventListener("mousemove", () => {
-        if (index !== i) {
-          index = i;
-          render();
-        }
-      });
-      m.appendChild(row);
-    });
+    for (const g of GROUPS) {
+      const members = filtered.filter((it) => it.group === g.id);
+      if (members.length === 0) continue;
+      const head = document.createElement("div");
+      head.className = "hd-slash-group";
+      head.textContent = tr(g.labelKey);
+      m.appendChild(head);
+      for (const it of members) {
+        const i = filtered.indexOf(it);
+        const row = document.createElement("div");
+        row.className = `hd-slash-item${i === index ? " sel" : ""}`;
+        const ico = document.createElement("span");
+        ico.className = "hd-ico";
+        ico.innerHTML = it.icon;
+        const label = document.createElement("span");
+        label.textContent = tr(it.labelKey);
+        row.append(ico, label);
+        row.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          const v = viewRef;
+          close();
+          if (v) it.run(v);
+        });
+        row.addEventListener("mousemove", () => {
+          if (index !== i) {
+            index = i;
+            render();
+          }
+        });
+        m.appendChild(row);
+      }
+    }
+    // Keyboard navigation follows into the scrolled region
+    m.querySelector(".hd-slash-item.sel")?.scrollIntoView({ block: "nearest" });
     if (filtered.length === 0) close();
   };
 
@@ -256,7 +92,7 @@ export function slashMenu(): Plugin {
     open = true;
     query = "";
     index = 0;
-    all = items();
+    all = hdocItems();
     menu.style.display = "block";
     // position: fixed → viewport coordinates straight from coordsAtPos
     const menuH = 320;
@@ -265,7 +101,7 @@ export function slashMenu(): Plugin {
       below + menuH > window.innerHeight
         ? Math.max(8, coords.top - menuH - 6)
         : below;
-    menu.style.left = `${Math.min(coords.left, window.innerWidth - 240)}px`;
+    menu.style.left = `${Math.min(coords.left, window.innerWidth - 250)}px`;
     menu.style.top = `${top}px`;
     render();
   };
@@ -299,7 +135,7 @@ export function slashMenu(): Plugin {
             return false;
           const { $from, empty } = view.state.selection;
           if (!empty || !$from.parent.isTextblock) return false;
-          if ($from.parent.type === n.code_block) return false;
+          if ($from.parent.type === hdocSchema.nodes.code_block) return false;
           const before = $from.parent.textBetween(
             Math.max(0, $from.parentOffset - 1),
             $from.parentOffset,

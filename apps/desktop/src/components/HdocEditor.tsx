@@ -1,22 +1,26 @@
-import { RefreshCw } from "lucide-react";
+import { PanelRight, RefreshCw } from "lucide-react";
 import { baseKeymap } from "prosemirror-commands";
 import { dropCursor } from "prosemirror-dropcursor";
 import { gapCursor } from "prosemirror-gapcursor";
 import { history, redo, undo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
+import { DOMSerializer, Fragment, Slice } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
 import { tableEditing } from "prosemirror-tables";
 import { EditorView } from "prosemirror-view";
 import { useEffect, useRef, useState } from "react";
 import { api, assetUrl } from "../lib/api";
 import { makeT } from "../lib/i18n";
+import type { TFn } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import type { AssetMeta } from "../lib/types";
 import { dragHandle } from "../hdoc/draghandle";
+import { hdocItems } from "../hdoc/items";
+import type { HdocItem } from "../hdoc/items";
 import { hdocNodeViews } from "../hdoc/nodeviews";
 import { parseHdoc } from "../hdoc/parse";
 import { hdocInputRules, hdocKeymap, hdocPlaceholders } from "../hdoc/plugins";
-import { THEMES } from "../hdoc/schema";
+import { hdocSchema, THEMES } from "../hdoc/schema";
 import { serializeHdoc } from "../hdoc/serialize";
 import { slashMenu } from "../hdoc/slash";
 import "prosemirror-view/style/prosemirror.css";
@@ -34,11 +38,21 @@ const SAVE_DEBOUNCE_MS = 1000;
  * save can never destroy what the editor doesn't understand. */
 export default function HdocEditor({ asset }: { asset: AssetMeta }) {
   const wrapEl = useRef<HTMLDivElement>(null);
+  const pmViewRef = useRef<EditorView | null>(null);
   const t = makeT(useStore((s) => s.lang));
   const wide = useStore((s) => s.mdWide);
   const [conflict, setConflict] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
   const [theme, setTheme] = useState("paper");
+  const [palette, setPalette] = useState(
+    localStorage.getItem("harbly.hdocPalette") !== "0",
+  );
+  const togglePalette = () => {
+    setPalette((v) => {
+      localStorage.setItem("harbly.hdocPalette", v ? "0" : "1");
+      return !v;
+    });
+  };
   const actions = useRef<{
     reload: () => void;
     keepMine: () => void;
@@ -157,6 +171,7 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
         view = buildView(parsed.doc);
         if (!view) return false;
       }
+      pmViewRef.current = view;
       lastSavedBody.v = serializeHdoc(view.state.doc);
       return true;
     };
@@ -225,6 +240,7 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
       document.removeEventListener("visibilitychange", onVisibility);
       if (saveTimer) clearTimeout(saveTimer);
       useStore.getState().setEditorHandle(null);
+      pmViewRef.current = null;
       const dying = view;
       // Flush first while the view is still valid, then checkpoint & destroy
       // (same ordering rationale as MarkdownEditor).
@@ -289,30 +305,113 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
           </button>
         </div>
       )}
-      {/* Document theme is a property of the file, not the app appearance */}
-      <div className="absolute top-2 right-3 z-10">
-        <select
-          value={theme}
-          onChange={(e) => actions.current.setTheme(e.target.value)}
-          title={t("hdocTheme")}
-          className="rounded-ctl border border-line bg-card px-2 py-1 text-[11px] text-sub transition outline-none hover:text-ink"
-        >
-          {THEMES.map((v) => (
-            <option key={v} value={v}>
-              {t(
-                v === "paper"
-                  ? "themePaper"
-                  : v === "sepia"
-                    ? "themeSepia"
-                    : "themeNight",
-              )}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div ref={wrapEl} className="hdoc-wrap relative min-h-full" />
+      <div className="flex min-h-0 flex-1">
+        <div className="relative min-h-0 min-w-0 flex-1">
+          {/* Document theme is a property of the file, not the app appearance */}
+          <div className="absolute top-2 right-3 z-10 flex items-center gap-1.5">
+            <select
+              value={theme}
+              onChange={(e) => actions.current.setTheme(e.target.value)}
+              title={t("hdocTheme")}
+              className="rounded-ctl border border-line bg-card px-2 py-1 text-[11px] text-sub transition outline-none hover:text-ink"
+            >
+              {THEMES.map((v) => (
+                <option key={v} value={v}>
+                  {t(
+                    v === "paper"
+                      ? "themePaper"
+                      : v === "sepia"
+                        ? "themeSepia"
+                        : "themeNight",
+                  )}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={togglePalette}
+              title={t("hdocInsertPanel")}
+              className={`grid h-7 w-7 place-items-center rounded-ctl border border-line transition ${
+                palette
+                  ? "bg-primary/10 text-primary"
+                  : "bg-card text-sub hover:text-ink"
+              }`}
+            >
+              <PanelRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="h-full overflow-y-auto">
+            <div ref={wrapEl} className="hdoc-wrap relative min-h-full" />
+          </div>
+        </div>
+        {palette && <InsertPalette viewRef={pmViewRef} t={t} />}
       </div>
     </main>
+  );
+}
+
+/** Right-side component rail: click inserts at the cursor, drag places the
+ * block exactly where it drops — the drag hands ProseMirror a ready slice via
+ * `view.dragging`, and its own drop logic + dropcursor do the rest. */
+function InsertPalette({
+  viewRef,
+  t,
+}: {
+  viewRef: React.RefObject<EditorView | null>;
+  t: TFn;
+}) {
+  const items = hdocItems();
+  const groups: { id: HdocItem["group"]; label: string }[] = [
+    { id: "basic", label: t("slashBasic") },
+    { id: "component", label: t("slashComponents") },
+  ];
+
+  const onDragStart = (e: React.DragEvent, it: HdocItem) => {
+    const v = viewRef.current;
+    if (!v) return;
+    const node = it.make();
+    const slice = new Slice(Fragment.from(node), 0, 0);
+    const frag = DOMSerializer.fromSchema(hdocSchema).serializeFragment(
+      slice.content,
+    );
+    const div = document.createElement("div");
+    div.appendChild(frag);
+    e.dataTransfer.setData("text/html", div.innerHTML);
+    e.dataTransfer.effectAllowed = "copy";
+    v.dragging = { slice, move: false };
+  };
+  const onDragEnd = () => {
+    const v = viewRef.current;
+    if (v) v.dragging = null;
+  };
+
+  return (
+    <aside className="hd-palette shrink-0 overflow-y-auto border-l border-line">
+      {groups.map((g) => (
+        <div key={g.id}>
+          <div className="hd-palette-group">{g.label}</div>
+          {items
+            .filter((it) => it.group === g.id)
+            .map((it) => (
+              <div
+                key={it.key}
+                draggable
+                onDragStart={(e) => onDragStart(e, it)}
+                onDragEnd={onDragEnd}
+                onClick={() => {
+                  const v = viewRef.current;
+                  if (v) it.run(v);
+                }}
+                className="hd-palette-item"
+              >
+                <span
+                  className="hd-ico"
+                  dangerouslySetInnerHTML={{ __html: it.icon }}
+                />
+                <span>{t(it.labelKey)}</span>
+              </div>
+            ))}
+        </div>
+      ))}
+    </aside>
   );
 }
