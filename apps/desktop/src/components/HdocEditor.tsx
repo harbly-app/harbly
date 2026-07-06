@@ -1,4 +1,4 @@
-import { PanelLeft, RefreshCw } from "lucide-react";
+import { ListTree, RefreshCw } from "lucide-react";
 import { baseKeymap } from "prosemirror-commands";
 import { dropCursor } from "prosemirror-dropcursor";
 import { gapCursor } from "prosemirror-gapcursor";
@@ -439,6 +439,30 @@ function InsertToolbar({
   const items = hdocItems();
   const groups: HdocItem["group"][] = ["basic", "component"];
 
+  // Icon-only toolbar: custom hover tooltip (the native title attribute is
+  // slow and the toolbar's overflow-x would clip a CSS-positioned one, so a
+  // single fixed-position bubble follows the hovered button instead).
+  const [tip, setTip] = useState<{
+    label: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const tipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showTip = (label: string) => (e: React.MouseEvent) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    if (tipTimer.current) clearTimeout(tipTimer.current);
+    tipTimer.current = setTimeout(
+      () => setTip({ label, x: r.left + r.width / 2, y: r.bottom + 6 }),
+      250,
+    );
+  };
+  const hideTip = () => {
+    if (tipTimer.current) clearTimeout(tipTimer.current);
+    tipTimer.current = null;
+    setTip(null);
+  };
+  useEffect(() => hideTip, []);
+
   const onDragStart = (e: React.DragEvent, it: HdocItem) => {
     const v = viewRef.current;
     if (!v) return;
@@ -468,11 +492,17 @@ function InsertToolbar({
             .map((it) => (
               <button
                 key={it.key}
-                title={t(it.labelKey)}
+                aria-label={t(it.labelKey)}
                 draggable
-                onDragStart={(e) => onDragStart(e, it)}
+                onMouseEnter={showTip(t(it.labelKey))}
+                onMouseLeave={hideTip}
+                onDragStart={(e) => {
+                  hideTip();
+                  onDragStart(e, it);
+                }}
                 onDragEnd={onDragEnd}
                 onClick={() => {
+                  hideTip();
                   const v = viewRef.current;
                   if (v) it.run(v);
                 }}
@@ -489,18 +519,31 @@ function InsertToolbar({
       {/* layout section: page-level modes, grouped with the blocks on the left */}
       <div className="mx-1.5 h-4 w-px shrink-0 bg-line" />
       <button
-        onClick={() => onLayout(layout === "docs" ? "article" : "docs")}
-        title={t("hdocLayoutToc")}
+        onClick={() => {
+          hideTip();
+          onLayout(layout === "docs" ? "article" : "docs");
+        }}
+        aria-label={t("hdocLayoutToc")}
+        onMouseEnter={showTip(t("hdocLayoutToc"))}
+        onMouseLeave={hideTip}
         className={`grid h-7 w-7 shrink-0 place-items-center rounded-ctl transition ${
           layout === "docs"
             ? "bg-primary/10 text-primary"
             : "text-sub hover:bg-side hover:text-ink"
         }`}
       >
-        <PanelLeft className="h-3.5 w-3.5" />
+        <ListTree className="h-3.5 w-3.5" />
       </button>
       <div className="min-w-3 flex-1" />
       {themeSel}
+      {tip && (
+        <div
+          className="pointer-events-none fixed z-[70] -translate-x-1/2 rounded-md bg-ink px-2 py-1 text-[11px] font-medium whitespace-nowrap text-paper shadow-md"
+          style={{ left: tip.x, top: tip.y }}
+        >
+          {tip.label}
+        </div>
+      )}
     </div>
   );
 }
