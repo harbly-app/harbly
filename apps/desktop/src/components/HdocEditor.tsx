@@ -126,10 +126,15 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
             }
           },
           // Paste or drop an image file → embed it as a self-contained figure.
+          // A clipboard image is often exposed in several formats (PNG + TIFF +
+          // …) as separate files; a paste is one logical image, so take only
+          // the first rather than inserting one copy per format.
           handlePaste: (v, event) => {
-            const files = Array.from(event.clipboardData?.files ?? []);
-            if (!files.some((f) => f.type.startsWith("image/"))) return false;
-            void insertImageFiles(v, files);
+            const image = Array.from(event.clipboardData?.files ?? []).find(
+              (f) => f.type.startsWith("image/"),
+            );
+            if (!image) return false;
+            void insertImageFiles(v, [image]);
             return true;
           },
           handleDrop: (v, event) => {
