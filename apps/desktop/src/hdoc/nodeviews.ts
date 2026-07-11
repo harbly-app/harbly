@@ -177,7 +177,7 @@ class FigureView extends ComponentView {
     );
     // src is not an attr of the figure node itself: route edits to the image child
     const srcInput = this.controls.get("src") as HTMLInputElement;
-    srcInput.value = String(node.firstChild?.attrs.src ?? "");
+    this.syncSrcInput();
     const setSrc = (src: string) => {
       const pos = getPos();
       if (pos === undefined || !this.node.firstChild) return;
@@ -221,12 +221,21 @@ class FigureView extends ComponentView {
     super.setAttr(view, getPos, attr, value);
   }
 
+  /** Mirror the image's src into the text input, but show an embedded data:
+   * URL (thousands of chars) as a friendly marker instead of the raw base64. */
+  private syncSrcInput() {
+    const srcInput = this.controls.get("src") as HTMLInputElement;
+    if (document.activeElement === srcInput) return;
+    const raw = String(this.node.firstChild?.attrs.src ?? "");
+    const embedded = raw.startsWith("data:");
+    const shown = embedded ? "" : raw;
+    if (srcInput.value !== shown) srcInput.value = shown;
+    srcInput.placeholder = tr(embedded ? "hdocEmbeddedImage" : "insImage");
+  }
+
   override update(node: PMNode): boolean {
     if (!super.update(node)) return false;
-    const srcInput = this.controls.get("src") as HTMLInputElement;
-    const v = String(node.firstChild?.attrs.src ?? "");
-    if (document.activeElement !== srcInput && srcInput.value !== v)
-      srcInput.value = v;
+    this.syncSrcInput();
     return true;
   }
 }
