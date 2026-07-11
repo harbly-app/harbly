@@ -181,6 +181,24 @@ describe("hdoc round-trip", () => {
     expect(s).toContain('v="2"');
   });
 
+  it("round-trips a figure with an embedded data: URL image", () => {
+    // Local images are embedded as data: URLs; the base64 payload must survive
+    // parse → serialize verbatim so the page stays a self-contained file.
+    const data =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+    const p = parseHdoc(
+      `<h-doc v="1"><h-figure caption="c"><img src="${data}" alt="a"></h-figure></h-doc>`,
+    );
+    expect(p.ok).toBe(true);
+    if (!p.ok) return;
+    const s = serializeHdoc(p.doc);
+    expect(s).toContain(`<img src="${data}" alt="a">`);
+    const p2 = parseHdoc(s);
+    expect(p2.ok).toBe(true);
+    if (!p2.ok) return;
+    expect(p2.doc.eq(p.doc)).toBe(true);
+  });
+
   it("dissolves thead/tbody wrappers without losing rows", () => {
     const p = parseHdoc(
       `<h-doc v="1"><table><thead><tr><th>a</th></tr></thead><tbody><tr><td>b</td></tr></tbody></table></h-doc>`,

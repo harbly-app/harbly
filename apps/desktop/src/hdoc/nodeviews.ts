@@ -15,6 +15,7 @@ import type {
 } from "prosemirror-view";
 import { relAssetUrl } from "../lib/api";
 import { tr } from "../lib/i18n";
+import { imageToDataUrl, pickImageFile } from "./image";
 
 type GetPos = () => number | undefined;
 
@@ -177,17 +178,36 @@ class FigureView extends ComponentView {
     // src is not an attr of the figure node itself: route edits to the image child
     const srcInput = this.controls.get("src") as HTMLInputElement;
     srcInput.value = String(node.firstChild?.attrs.src ?? "");
-    srcInput.addEventListener("change", () => {
+    const setSrc = (src: string) => {
       const pos = getPos();
       if (pos === undefined || !this.node.firstChild) return;
       const img = this.node.firstChild;
-      if (img.attrs.src === srcInput.value) return;
+      if (img.attrs.src === src) return;
       view.dispatch(
-        view.state.tr.setNodeMarkup(pos + 1, null, {
-          ...img.attrs,
-          src: srcInput.value,
-        }),
+        view.state.tr.setNodeMarkup(pos + 1, null, { ...img.attrs, src }),
       );
+    };
+    srcInput.addEventListener("change", () => setSrc(srcInput.value));
+
+    // Picking a local file embeds it as a data: URL so the page stays a single
+    // self-contained file; the src input remains for external URLs.
+    const pick = async () => {
+      const file = await pickImageFile();
+      if (!file) return;
+      const url = await imageToDataUrl(file).catch(() => null);
+      if (url) setSrc(url);
+    };
+    const pickBtn = document.createElement("button");
+    pickBtn.type = "button";
+    pickBtn.className = "hd-attr hd-pick-img";
+    pickBtn.textContent = tr("hdocPickImage");
+    pickBtn.addEventListener("click", () => void pick());
+    this.dom.querySelector(".hd-fields")?.prepend(pickBtn);
+    // The empty placeholder is itself a click target for picking.
+    this.dom.addEventListener("click", (e) => {
+      const el = e.target as HTMLElement;
+      if (el.tagName === "IMG" && el.classList.contains("hd-img-empty"))
+        void pick();
     });
   }
 

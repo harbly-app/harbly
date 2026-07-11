@@ -15,6 +15,7 @@ import type { TFn } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import type { AssetMeta } from "../lib/types";
 import { dragHandle } from "../hdoc/draghandle";
+import { insertImageFiles } from "../hdoc/image";
 import { hdocItems } from "../hdoc/items";
 import type { HdocItem } from "../hdoc/items";
 import { hdocNodeViews } from "../hdoc/nodeviews";
@@ -123,6 +124,24 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
               dirty.v = true;
               scheduleSave();
             }
+          },
+          // Paste or drop an image file → embed it as a self-contained figure.
+          handlePaste: (v, event) => {
+            const files = Array.from(event.clipboardData?.files ?? []);
+            if (!files.some((f) => f.type.startsWith("image/"))) return false;
+            void insertImageFiles(v, files);
+            return true;
+          },
+          handleDrop: (v, event) => {
+            const files = Array.from(event.dataTransfer?.files ?? []);
+            if (!files.some((f) => f.type.startsWith("image/"))) return false;
+            const at = v.posAtCoords({
+              left: event.clientX,
+              top: event.clientY,
+            })?.pos;
+            event.preventDefault();
+            void insertImageFiles(v, files, at);
+            return true;
           },
         },
       );

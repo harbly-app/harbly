@@ -453,12 +453,27 @@ h-figure .hd-fields {
   color: var(--hd-sub);
   text-align: center;
 }
+.hd-pick-img {
+  align-self: center;
+  cursor: pointer;
+  border: 1px solid var(--hd-line);
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--hd-sub);
+  background: var(--hd-bg);
+}
+.hd-pick-img:hover {
+  color: var(--hd-k, inherit);
+  border-color: var(--hd-sub);
+}
 .hdoc-editor .hd-img-empty {
   min-height: 90px;
   width: 240px;
   background: var(--hd-soft);
   border: 1px dashed var(--hd-line);
   border-radius: 8px;
+  cursor: pointer;
 }
 .hdoc-editor h-toc {
   min-height: 3em;
