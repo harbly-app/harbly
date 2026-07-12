@@ -46,6 +46,7 @@ pub struct TreeFile {
     pub id: String,
     pub name: String,
     pub ver_count: i64,
+    pub favorite: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -434,6 +434,9 @@ function FileRow(props: {
           ) : (
             <span className="flex-1 truncate">{f.name}</span>
           )}
+          {f.favorite && !editing && (
+            <Star className="h-3 w-3 shrink-0 fill-warn text-warn" />
+          )}
         </div>
       </CM.Trigger>
       <CM.Portal>
@@ -462,6 +465,15 @@ function FileRow(props: {
             icon={<PencilLine className="h-3.5 w-3.5" />}
             label={t("rename")}
             onClick={() => st().startEditAsset(f.id)}
+          />
+          <MItem
+            icon={
+              <Star
+                className={`h-3.5 w-3.5 ${f.favorite ? "fill-warn text-warn" : ""}`}
+              />
+            }
+            label={f.favorite ? t("removeFavorite") : t("addFavorite")}
+            onClick={() => api.setFavorite(f.id, !f.favorite).catch(() => {})}
           />
           <MItem
             icon={<TagIcon className="h-3.5 w-3.5" />}

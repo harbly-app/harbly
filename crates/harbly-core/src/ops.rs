@@ -181,7 +181,7 @@ impl Library {
         {
             let db = self.db.lock().unwrap();
             let mut stmt = db.prepare(
-                "SELECT id, rel_path, folder, (SELECT COUNT(*) FROM versions v WHERE v.asset_id=assets.id) \
+                "SELECT id, rel_path, folder, (SELECT COUNT(*) FROM versions v WHERE v.asset_id=assets.id), favorite \
                  FROM assets WHERE folder != ?1 ORDER BY rel_path COLLATE NOCASE",
             )?;
             let rows = stmt
@@ -191,15 +191,17 @@ impl Library {
                         r.get::<_, String>(1)?,
                         r.get::<_, String>(2)?,
                         r.get::<_, i64>(3)?,
+                        r.get::<_, i64>(4)? != 0,
                     ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            for (id, rel, folder, vc) in rows {
+            for (id, rel, folder, vc, fav) in rows {
                 let name = rel.rsplit('/').next().unwrap_or(&rel).to_string();
                 files_of.entry(folder).or_default().push(TreeFile {
                     id,
                     name,
                     ver_count: vc,
+                    favorite: fav,
                 });
             }
         }

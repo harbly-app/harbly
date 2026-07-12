@@ -32,6 +32,7 @@ export interface TreeFile {
   id: string;
   name: string;
   verCount: number;
+  favorite: boolean;
 }
 
 export interface SearchHit {
