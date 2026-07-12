@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.zeyu.harbly",
   "build": {
-    "beforeDevCommand": "cargo build -p harbly-mcp && pnpm dev",
+    "beforeDevCommand": "node scripts/prepare-sidecar.mjs && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "cargo build -p harbly-mcp --release && pnpm build",
+    "beforeBuildCommand": "node scripts/prepare-sidecar.mjs && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -34,6 +34,7 @@
   "bundle": {
     "active": true,
     "targets": ["dmg"],
+    "externalBin": ["binaries/harbly-mcp"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

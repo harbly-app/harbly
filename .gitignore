@@ -12,3 +12,6 @@ apps/landing/
 
 # internal design docs, never published
 docs/
+
+# staged sidecar binaries (built by apps/desktop/scripts/prepare-sidecar.mjs)
+apps/desktop/src-tauri/binaries/
