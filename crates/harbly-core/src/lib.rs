@@ -18,7 +18,10 @@ pub use error::{HarblyError, Result};
 pub use hdoc::{HDOC_NEW_TEMPLATE, HDOC_VOCAB_VERSION};
 pub use markdown::md_to_html_body;
 pub use ops::copy_dir_recursive;
-pub use tags_xattr::{copy_tags, read_tags as read_file_tags, write_tags as write_file_tags};
+pub use tags_xattr::{
+    copy_tags, read_favorite as read_file_favorite, read_tags as read_file_tags,
+    write_favorite as write_file_favorite, write_tags as write_file_tags,
+};
 pub use types::*;
 pub use watch::watch_library;
 

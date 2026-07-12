@@ -14,6 +14,7 @@ import {
   LayoutTemplate,
   PencilLine,
   Sparkles,
+  Star,
   Tag as TagIcon,
   Trash2,
 } from "lucide-react";
@@ -428,6 +429,9 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
               </div>
             )}
             <div className="mt-1 flex items-center gap-1.5 text-[10.5px] text-sub">
+              {a.favorite && (
+                <Star className="h-3 w-3 shrink-0 fill-warn text-warn" />
+              )}
               <span className="shrink-0 truncate">
                 {timeAgo(a.createdAt, lang)}
               </span>
@@ -465,6 +469,27 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
           {multi ? (
             // Multi-select: act on the whole group
             <>
+              <MItem
+                icon={<Star className="h-3.5 w-3.5" />}
+                label={
+                  // Any unstarred in the group → star them all; else unstar all
+                  st().assets.some(
+                    (x) => selIds().includes(x.id) && !x.favorite,
+                  )
+                    ? t("favoriteN", { n: selIds().length })
+                    : t("unfavoriteN", { n: selIds().length })
+                }
+                onClick={() => {
+                  const sel = st().assets.filter((x) =>
+                    selIds().includes(x.id),
+                  );
+                  const target = sel.some((x) => !x.favorite);
+                  for (const x of sel) {
+                    if (x.favorite !== target)
+                      api.setFavorite(x.id, target).catch(() => {});
+                  }
+                }}
+              />
               <MItem
                 icon={<ClipboardCopy className="h-3.5 w-3.5" />}
                 label={t("copyN", { n: selIds().length })}
@@ -526,6 +551,17 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
                 label={t("rename")}
                 hint="↵"
                 onClick={() => st().startEditAsset(a.id)}
+              />
+              <MItem
+                icon={
+                  <Star
+                    className={`h-3.5 w-3.5 ${a.favorite ? "fill-warn text-warn" : ""}`}
+                  />
+                }
+                label={a.favorite ? t("removeFavorite") : t("addFavorite")}
+                onClick={() =>
+                  api.setFavorite(a.id, !a.favorite).catch(() => {})
+                }
               />
               <MItem
                 icon={<TagIcon className="h-3.5 w-3.5" />}

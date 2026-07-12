@@ -298,6 +298,7 @@ impl Library {
                             "title": a.title,
                             "size_bytes": a.size_bytes,
                             "ver_count": a.ver_count,
+                            "favorite": a.favorite,
                         })
                     })
                     .collect();

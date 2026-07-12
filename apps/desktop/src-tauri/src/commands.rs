@@ -1093,6 +1093,32 @@ pub async fn set_tags(app: AppHandle, id: String, tags: Vec<String>) -> Result<(
 }
 
 #[tauri::command]
+pub async fn set_favorite(app: AppHandle, id: String, favorite: bool) -> Result<(), String> {
+    app.state::<AppState>()
+        .lib()?
+        .set_favorite(&id, favorite)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("library-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn favorite_assets(app: AppHandle) -> Result<Vec<harbly_core::AssetMeta>, String> {
+    app.state::<AppState>()
+        .lib()?
+        .favorite_assets()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn favorite_count(app: AppHandle) -> Result<i64, String> {
+    app.state::<AppState>()
+        .lib()?
+        .favorite_count()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn all_tags(app: AppHandle) -> Result<Vec<harbly_core::TagInfo>, String> {
     app.state::<AppState>()
         .lib()?

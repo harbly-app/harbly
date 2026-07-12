@@ -29,7 +29,8 @@ fn migrate(conn: &Connection) -> Result<()> {
             size_bytes   INTEGER NOT NULL,
             mtime        INTEGER NOT NULL,
             created_at   INTEGER NOT NULL,
-            updated_at   INTEGER NOT NULL
+            updated_at   INTEGER NOT NULL,
+            favorite     INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_assets_hash   ON assets(current_hash);
         CREATE INDEX IF NOT EXISTS idx_assets_folder ON assets(folder);
@@ -99,6 +100,10 @@ fn migrate(conn: &Connection) -> Result<()> {
     // ("duplicate column") is the expected steady state.
     let _ = conn.execute("ALTER TABLE ai_runs ADD COLUMN session_id TEXT", []);
     let _ = conn.execute("ALTER TABLE ai_runs ADD COLUMN message_id TEXT", []);
+    let _ = conn.execute(
+        "ALTER TABLE assets ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
     conn.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?1)",
         [SCHEMA_VERSION.to_string()],

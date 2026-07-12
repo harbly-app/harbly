@@ -10,6 +10,7 @@ import {
   Settings,
   Sparkles,
   SquarePen,
+  Star,
 } from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api";
@@ -125,6 +126,20 @@ export default function TitleBar() {
               <MoveHorizontal className="h-4 w-4" />
             </button>
           )}
+
+          <button
+            onClick={() =>
+              api.setFavorite(viewer.id, !viewer.favorite).catch(() => {})
+            }
+            title={viewer.favorite ? t("removeFavorite") : t("addFavorite")}
+            className={`relative z-[1] grid h-8 w-8 place-items-center rounded-ctl transition ${
+              viewer.favorite
+                ? "text-warn hover:bg-side"
+                : "text-sub hover:bg-side hover:text-ink"
+            }`}
+          >
+            <Star className={`h-4 w-4 ${viewer.favorite ? "fill-warn" : ""}`} />
+          </button>
 
           <button
             onClick={toggleAi}

@@ -127,12 +127,15 @@ impl Library {
         Ok(())
     }
 
-    /// Make database tags follow the on-disk xattrs (Finder adding/removing tags, restoring files that carry tags, etc.)
+    /// Make database tags + stars follow the on-disk xattrs (Finder adding/
+    /// removing tags, restoring files that carry tags, files starred on
+    /// another machine syncing in, etc.)
     #[cfg(target_os = "macos")]
     fn sync_tags_from_disk(&self) -> Result<usize> {
         let mut n = 0usize;
         for a in self.all_assets()? {
-            let disk = crate::tags_xattr::read_tags(&self.abs(&a.rel_path));
+            let abs = self.abs(&a.rel_path);
+            let disk = crate::tags_xattr::read_tags(&abs);
             let mut want = disk.clone();
             want.sort();
             let mut have = a.tags.clone();
@@ -140,6 +143,11 @@ impl Library {
             have.dedup();
             if want != have {
                 self.set_tags_db(&a.id, &disk)?;
+                n += 1;
+            }
+            let fav_disk = crate::tags_xattr::read_favorite(&abs);
+            if fav_disk != a.favorite {
+                self.set_favorite_db(&a.id, fav_disk)?;
                 n += 1;
             }
         }
@@ -239,12 +247,17 @@ impl Library {
             )?;
         }
         self.write_version(&id, content, hash, ver_label)?;
-        // If a newly registered file carries Finder tags (import / restored from Trash / moved in externally), index them immediately
+        // If a newly registered file carries Finder tags or a star (import /
+        // restored from Trash / moved in externally), index them immediately
         #[cfg(target_os = "macos")]
         {
-            let disk = crate::tags_xattr::read_tags(&self.abs(rel));
+            let abs = self.abs(rel);
+            let disk = crate::tags_xattr::read_tags(&abs);
             if !disk.is_empty() {
                 self.set_tags_db(&id, &disk)?;
+            }
+            if crate::tags_xattr::read_favorite(&abs) {
+                self.set_favorite_db(&id, true)?;
             }
         }
         Ok(id)

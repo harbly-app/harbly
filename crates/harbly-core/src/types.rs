@@ -17,6 +17,8 @@ pub struct AssetMeta {
     pub created_at: i64,
     pub updated_at: i64,
     pub tags: Vec<String>,
+    /// Starred by the user; mirrors the on-file com.harbly.favorite xattr
+    pub favorite: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -44,6 +46,7 @@ pub struct TreeFile {
     pub id: String,
     pub name: String,
     pub ver_count: i64,
+    pub favorite: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

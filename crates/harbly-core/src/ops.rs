@@ -7,7 +7,8 @@ use walkdir::WalkDir;
 
 const ASSET_COLS: &str = "a.id, a.rel_path, a.folder, a.title, a.source, a.size_bytes, a.current_hash, a.created_at, a.updated_at, \
     (SELECT COUNT(*) FROM versions v WHERE v.asset_id=a.id), \
-    (SELECT GROUP_CONCAT(tag, char(31)) FROM asset_tags t WHERE t.asset_id=a.id)";
+    (SELECT GROUP_CONCAT(tag, char(31)) FROM asset_tags t WHERE t.asset_id=a.id), \
+    a.favorite";
 
 /// Recursively copy a directory, skipping hidden entries (.harbly etc.); Finder tag xattrs travel along
 pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
@@ -48,6 +49,7 @@ fn row_to_asset(r: &rusqlite::Row) -> rusqlite::Result<AssetMeta> {
         tags: tags_raw
             .map(|s| s.split('\u{1f}').map(|t| t.to_string()).collect())
             .unwrap_or_default(),
+        favorite: r.get::<_, i64>(11)? != 0,
     })
 }
 
@@ -179,7 +181,7 @@ impl Library {
         {
             let db = self.db.lock().unwrap();
             let mut stmt = db.prepare(
-                "SELECT id, rel_path, folder, (SELECT COUNT(*) FROM versions v WHERE v.asset_id=assets.id) \
+                "SELECT id, rel_path, folder, (SELECT COUNT(*) FROM versions v WHERE v.asset_id=assets.id), favorite \
                  FROM assets WHERE folder != ?1 ORDER BY rel_path COLLATE NOCASE",
             )?;
             let rows = stmt
@@ -189,15 +191,17 @@ impl Library {
                         r.get::<_, String>(1)?,
                         r.get::<_, String>(2)?,
                         r.get::<_, i64>(3)?,
+                        r.get::<_, i64>(4)? != 0,
                     ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            for (id, rel, folder, vc) in rows {
+            for (id, rel, folder, vc, fav) in rows {
                 let name = rel.rsplit('/').next().unwrap_or(&rel).to_string();
                 files_of.entry(folder).or_default().push(TreeFile {
                     id,
                     name,
                     ver_count: vc,
+                    favorite: fav,
                 });
             }
         }
@@ -403,7 +407,7 @@ impl Library {
         let hits = stmt.query_map([&match_q], |r| {
             Ok(SearchHit {
                 asset: row_to_asset(r)?,
-                snippet: r.get(11)?,
+                snippet: r.get(12)?,
             })
         });
         // MATCH syntax errors caused by special characters are treated as empty results, not errors
@@ -441,6 +445,46 @@ impl Library {
         let cur = self.asset(id)?;
         let _ = crate::tags_xattr::write_tags(&self.abs(&cur.rel_path), tags);
         self.set_tags_db(id, tags)
+    }
+
+    /// Star / unstar: same disk-first contract as tags — the xattr travels
+    /// with the file, the database column is a query cache the scan reconciles.
+    pub fn set_favorite(&self, id: &str, favorite: bool) -> Result<()> {
+        let cur = self.asset(id)?;
+        let _ = crate::tags_xattr::write_favorite(&self.abs(&cur.rel_path), favorite);
+        self.set_favorite_db(id, favorite)
+    }
+
+    /// Update only the database cache (scan reconciliation path)
+    pub(crate) fn set_favorite_db(&self, id: &str, favorite: bool) -> Result<()> {
+        let db = self.db.lock().unwrap();
+        db.execute(
+            "UPDATE assets SET favorite=?2 WHERE id=?1",
+            params![id, favorite as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Starred assets, newest first.
+    pub fn favorite_assets(&self) -> Result<Vec<AssetMeta>> {
+        let db = self.db.lock().unwrap();
+        let sql = format!(
+            "SELECT {ASSET_COLS} FROM assets a WHERE a.favorite=1 ORDER BY a.created_at DESC"
+        );
+        let mut stmt = db.prepare(&sql)?;
+        let rows = stmt
+            .query_map([], row_to_asset)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    pub fn favorite_count(&self) -> Result<i64> {
+        let db = self.db.lock().unwrap();
+        Ok(
+            db.query_row("SELECT COUNT(*) FROM assets WHERE favorite=1", [], |r| {
+                r.get(0)
+            })?,
+        )
     }
 
     /// Update only the database cache (used when a scan reconciles with disk, avoiding a loop from writing the xattr back)
