@@ -11,7 +11,7 @@ import type {
   TagInfo,
   TreeNode,
 } from "./types";
-import { INBOX } from "./types";
+import { FAVORITES, INBOX } from "./types";
 
 export type Modal =
   | { kind: "move"; ids: string[]; label: string; fromFolder: string | null }
@@ -58,8 +58,9 @@ interface S {
   root: string | null;
   tree: TreeNode | null;
   inbox: number;
+  favCount: number;
   tags: TagInfo[];
-  /** Current view: "" = all assets · "_inbox" = inbox · "#xx" = tag view · anything else = folder relative path */
+  /** Current view: "" = all assets · "_inbox" = inbox · "::favorites" = starred · "#xx" = tag view · anything else = folder relative path */
   folder: string;
   sort: SortKey;
   assets: AssetMeta[];
@@ -157,7 +158,7 @@ function viewExists(
   tags: TagInfo[],
   folder: string,
 ): boolean {
-  if (folder === "" || folder === INBOX) return true;
+  if (folder === "" || folder === INBOX || folder === FAVORITES) return true;
   if (isTagView(folder)) return tags.some((t) => `#${t.name}` === folder);
   if (!tree) return false;
   const walk = (n: TreeNode): boolean =>
@@ -166,14 +167,15 @@ function viewExists(
 }
 
 function fetchAssets(folder: string, sort: SortKey): Promise<AssetMeta[]> {
+  if (folder === FAVORITES) return api.favoriteAssets();
   return isTagView(folder)
     ? api.assetsByTag(folder.slice(1))
     : api.listAssets(folder, sort);
 }
 
-/** Destination directory for import/paste: tag views land in the library root, all other views in the current folder */
+/** Destination directory for import/paste: tag and starred views land in the library root, all other views in the current folder */
 function importDest(folder: string) {
-  return isTagView(folder) ? "" : folder;
+  return isTagView(folder) || folder === FAVORITES ? "" : folder;
 }
 
 function importToast(get: () => S, r: ImportResult): Toast {
@@ -207,6 +209,7 @@ export const useStore = create<S>((set, get) => ({
   root: null,
   tree: null,
   inbox: 0,
+  favCount: 0,
   tags: [],
   folder: "",
   sort: "recent",
@@ -305,9 +308,10 @@ export const useStore = create<S>((set, get) => ({
 
   refresh: async () => {
     const { folder, sort } = get();
-    const [tree, inbox, tags] = await Promise.all([
+    const [tree, inbox, favCount, tags] = await Promise.all([
       api.dirTree(),
       api.inboxCount(),
+      api.favoriteCount(),
       api.allTags(),
     ]);
     const f = viewExists(tree, tags, folder) ? folder : "";
@@ -317,6 +321,7 @@ export const useStore = create<S>((set, get) => ({
     set((s) => ({
       tree,
       inbox,
+      favCount,
       tags,
       folder: f,
       assets,
@@ -399,7 +404,11 @@ export const useStore = create<S>((set, get) => ({
     const st = get();
     const dest =
       folder ??
-      (st.folder.startsWith("#") || st.folder === INBOX ? "" : st.folder);
+      (st.folder.startsWith("#") ||
+      st.folder === INBOX ||
+      st.folder === FAVORITES
+        ? ""
+        : st.folder);
     try {
       const a = await api.newMarkdown(dest);
       get().setFolder(a.folder);
@@ -414,7 +423,11 @@ export const useStore = create<S>((set, get) => ({
     const st = get();
     const dest =
       folder ??
-      (st.folder.startsWith("#") || st.folder === INBOX ? "" : st.folder);
+      (st.folder.startsWith("#") ||
+      st.folder === INBOX ||
+      st.folder === FAVORITES
+        ? ""
+        : st.folder);
     try {
       const a = await api.newHdoc(dest);
       get().setFolder(a.folder);
@@ -550,7 +563,7 @@ export const useStore = create<S>((set, get) => ({
   // Deletion entry point (sidebar context menu + Cmd+Backspace on the highlighted folder):
   // empty folders trash immediately; non-empty ones confirm first, Enter = fast confirm
   requestDeleteFolder: async (rel) => {
-    if (!rel || rel === INBOX || isTagView(rel)) return;
+    if (!rel || rel === INBOX || rel === FAVORITES || isTagView(rel)) return;
     const label = rel.split("/").pop() ?? rel;
     let hasContent = true; // if the probe fails, err on the side of asking
     try {

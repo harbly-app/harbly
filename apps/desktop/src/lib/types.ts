@@ -11,6 +11,8 @@ export interface AssetMeta {
   createdAt: number;
   updatedAt: number;
   tags: string[];
+  /** Starred by the user; mirrors the on-file com.harbly.favorite xattr */
+  favorite: boolean;
 }
 
 export interface TagInfo {
@@ -143,6 +145,10 @@ export interface AiRun {
 }
 
 export const INBOX = "_inbox";
+
+/** Virtual folder id for the starred view — never a real path on disk
+ * (folders can't be named this) and never a tag view (no "#" prefix). */
+export const FAVORITES = "::favorites";
 
 /** A Markdown asset — opened in the editor rather than the preview iframe. */
 export const isMd = (name: string) => /\.(md|markdown)$/i.test(name);

@@ -7,6 +7,26 @@ use std::path::Path;
 
 pub const XATTR_KEY: &str = "com.apple.metadata:_kMDItemUserTags";
 
+/// Harbly's star flag, stored on the file itself like Finder tags so it
+/// travels with moves/copies/backups. Attribute present = favorited.
+pub const FAV_XATTR_KEY: &str = "com.harbly.favorite";
+
+#[cfg(target_os = "macos")]
+pub fn read_favorite(path: &Path) -> bool {
+    matches!(xattr::get(path, FAV_XATTR_KEY), Ok(Some(_)))
+}
+
+#[cfg(target_os = "macos")]
+pub fn write_favorite(path: &Path, favorite: bool) -> std::io::Result<()> {
+    if favorite {
+        xattr::set(path, FAV_XATTR_KEY, b"1")
+    } else {
+        // Removing an attribute that was never set is not an error worth surfacing
+        let _ = xattr::remove(path, FAV_XATTR_KEY);
+        Ok(())
+    }
+}
+
 /// Read the raw entries (keeping the "\ncolor-number" suffix) so rewrites can preserve Finder colors
 #[cfg(target_os = "macos")]
 fn read_raw(path: &Path) -> Vec<String> {
@@ -60,16 +80,20 @@ pub fn write_tags(path: &Path, tags: &[String]) -> std::io::Result<()> {
     xattr::set(path, XATTR_KEY, &cur.into_inner())
 }
 
-/// Copy the tag attribute verbatim — std::fs::copy does not carry xattrs, so patch it up after copying a file/folder
+/// Copy the tag + favorite attributes verbatim — std::fs::copy does not carry
+/// xattrs, so patch them up after copying a file/folder
 #[cfg(target_os = "macos")]
 pub fn copy_tags(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if let Ok(Some(data)) = xattr::get(src, FAV_XATTR_KEY) {
+        let _ = xattr::set(dst, FAV_XATTR_KEY, &data);
+    }
     match xattr::get(src, XATTR_KEY) {
         Ok(Some(data)) => xattr::set(dst, XATTR_KEY, &data),
         _ => Ok(()),
     }
 }
 
-// Non-macOS: no-op implementations; tags live only in the database
+// Non-macOS: no-op implementations; tags and stars live only in the database
 #[cfg(not(target_os = "macos"))]
 pub fn read_tags(_: &Path) -> Vec<String> {
     vec![]
@@ -80,5 +104,13 @@ pub fn write_tags(_: &Path, _: &[String]) -> std::io::Result<()> {
 }
 #[cfg(not(target_os = "macos"))]
 pub fn copy_tags(_: &Path, _: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+#[cfg(not(target_os = "macos"))]
+pub fn read_favorite(_: &Path) -> bool {
+    false
+}
+#[cfg(not(target_os = "macos"))]
+pub fn write_favorite(_: &Path, _: bool) -> std::io::Result<()> {
     Ok(())
 }

@@ -32,6 +32,7 @@ const meta = (): AssetMeta => ({
   createdAt: 0,
   updatedAt: 0,
   tags: [],
+  favorite: false,
 });
 
 // Installed before render, so every invoke() from the editor hits the mock.

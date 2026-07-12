@@ -199,6 +199,44 @@ fn tags_and_export() {
 }
 
 #[test]
+fn favorites_star_persist_and_rescan() {
+    let (_tmp, lib) = setup();
+    let root = lib.root().to_path_buf();
+    fs::write(root.join("a.html"), html("A", "内容甲")).unwrap();
+    fs::write(root.join("b.html"), html("B", "内容乙")).unwrap();
+    lib.scan(|_| {}).unwrap();
+    let assets = lib.list_assets("", harbly_core::SortKey::Name).unwrap();
+    let (a, b) = (&assets[0], &assets[1]);
+    assert!(!a.favorite);
+
+    // Star → metadata, favorites view, count, and the on-file xattr all agree
+    lib.set_favorite(&a.id, true).unwrap();
+    assert!(lib.asset(&a.id).unwrap().favorite);
+    let favs = lib.favorite_assets().unwrap();
+    assert_eq!(favs.len(), 1);
+    assert_eq!(favs[0].id, a.id);
+    assert_eq!(lib.favorite_count().unwrap(), 1);
+    assert!(harbly_core::read_file_favorite(&root.join(&a.rel_path)));
+
+    // Disk is the source of truth: star b externally (another machine / a
+    // restored backup), rescan adopts it
+    harbly_core::write_file_favorite(&root.join(&b.rel_path), true).unwrap();
+    let sum = lib.scan(|_| {}).unwrap();
+    assert!(sum.tags_synced >= 1);
+    assert!(lib.asset(&b.id).unwrap().favorite);
+    assert_eq!(lib.favorite_count().unwrap(), 2);
+
+    // The duplicate inherits the star (xattrs travel with copies)
+    let copy = lib.duplicate_asset(&a.id).unwrap();
+    assert!(lib.asset(&copy.id).unwrap().favorite);
+
+    // Unstar removes the xattr, not just the cache
+    lib.set_favorite(&a.id, false).unwrap();
+    assert!(!lib.asset(&a.id).unwrap().favorite);
+    assert!(!harbly_core::read_file_favorite(&root.join(&a.rel_path)));
+}
+
+#[test]
 fn move_rename_inbox() {
     let (_tmp, lib) = setup();
     fs::write(

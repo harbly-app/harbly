@@ -91,6 +91,10 @@ export const api = {
     invoke<null>("set_tags", { id, tags }),
   allTags: () => invoke<TagInfo[]>("all_tags"),
   assetsByTag: (tag: string) => invoke<AssetMeta[]>("assets_by_tag", { tag }),
+  setFavorite: (id: string, favorite: boolean) =>
+    invoke<null>("set_favorite", { id, favorite }),
+  favoriteAssets: () => invoke<AssetMeta[]>("favorite_assets"),
+  favoriteCount: () => invoke<number>("favorite_count"),
   allowOnce: (id: string) => invoke<string>("asset_allow_once", { id }),
   exportAsset: (id: string) => invoke<string | null>("export_asset", { id }),
   exportFolder: (rel: string) =>

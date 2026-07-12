@@ -17,6 +17,7 @@ import {
   LayoutTemplate,
   PencilLine,
   SquarePen,
+  Star,
   Tag as TagIcon,
   Trash2,
 } from "lucide-react";
@@ -25,7 +26,7 @@ import { api } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import { dragJustEnded, useStore } from "../lib/store";
 import type { TreeFile, TreeNode } from "../lib/types";
-import { INBOX, isHdoc, isMd, stemName } from "../lib/types";
+import { FAVORITES, INBOX, isHdoc, isMd, stemName } from "../lib/types";
 import { dragStartHandler } from "../lib/drag";
 import { menuContentCls, MItem, MSep } from "./menu";
 import RenameInput from "./RenameInput";
@@ -54,6 +55,7 @@ function gotoFolder(rel: string) {
 export default function Sidebar() {
   const tree = useStore((s) => s.tree);
   const inbox = useStore((s) => s.inbox);
+  const favCount = useStore((s) => s.favCount);
   const tags = useStore((s) => s.tags);
   const folder = useStore((s) => s.folder);
   const viewerId = useStore((s) => s.viewerAsset?.id ?? null);
@@ -110,6 +112,20 @@ export default function Sidebar() {
               <span className="grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1.5 text-[10.5px] font-bold text-white">
                 {inbox}
               </span>
+            )}
+          </button>
+          <button
+            onClick={() => gotoFolder(FAVORITES)}
+            className={`flex w-full items-center gap-2 rounded-ctl px-2.5 py-2 text-[12.5px] transition ${
+              folder === FAVORITES && !viewerId
+                ? "bg-primary/10 font-bold text-primary"
+                : "text-ink hover:bg-card"
+            }`}
+          >
+            <Star className="h-4 w-4" />
+            <span className="flex-1 text-left">{t("favorites")}</span>
+            {favCount > 0 && (
+              <span className="text-[10.5px] text-sub">{favCount}</span>
             )}
           </button>
         </div>
