@@ -1362,6 +1362,15 @@ pub async fn forward_edit_action(app: AppHandle, action: String) -> Result<(), S
     })?
 }
 
+/// Read one image off the system clipboard as a PNG data: URL (None if there is
+/// no image). The rich editor uses this instead of the native paste so a single
+/// clipboard image lands as a single figure — the native paste would insert one
+/// copy per clipboard format.
+#[tauri::command]
+pub async fn read_clipboard_image(app: AppHandle) -> Result<Option<String>, String> {
+    on_main(&app, crate::pasteboard::read_image_data_url)
+}
+
 /// Open an external link in the default browser (used by links inside AI
 /// replies — the webview itself must never navigate).
 #[tauri::command]

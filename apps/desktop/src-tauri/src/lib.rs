@@ -71,6 +71,7 @@ pub fn run() {
             commands::pasteboard_copy,
             commands::pasteboard_paste,
             commands::forward_edit_action,
+            commands::read_clipboard_image,
             commands::set_language,
             commands::get_language,
             ai::ai_detect_agents,

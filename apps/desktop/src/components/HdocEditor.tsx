@@ -15,7 +15,11 @@ import type { TFn } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import type { AssetMeta } from "../lib/types";
 import { dragHandle } from "../hdoc/draghandle";
-import { insertImageFiles } from "../hdoc/image";
+import {
+  handleEditorPaste,
+  insertImageFiles,
+  stripOpaqueImages,
+} from "../hdoc/image";
 import { hdocItems } from "../hdoc/items";
 import type { HdocItem } from "../hdoc/items";
 import { hdocNodeViews } from "../hdoc/nodeviews";
@@ -125,18 +129,12 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
               scheduleSave();
             }
           },
-          // Paste or drop an image file → embed it as a self-contained figure.
-          // A clipboard image is often exposed in several formats (PNG + TIFF +
-          // …) as separate files; a paste is one logical image, so take only
-          // the first rather than inserting one copy per format.
-          handlePaste: (v, event) => {
-            const image = Array.from(event.clipboardData?.files ?? []).find(
-              (f) => f.type.startsWith("image/"),
-            );
-            if (!image) return false;
-            void insertImageFiles(v, [image]);
-            return true;
-          },
+          // Every paste trigger (⌘V menu forward, right-click → Paste, plain
+          // browser paste) converges on this DOM event; image ingestion is
+          // owned entirely in hdoc/image.ts. transformPasted is the backstop
+          // for rich pastes that mix text with session-local image srcs.
+          handlePaste: (v, event) => handleEditorPaste(v, event),
+          transformPasted: (slice) => stripOpaqueImages(slice),
           handleDrop: (v, event) => {
             const files = Array.from(event.dataTransfer?.files ?? []);
             if (!files.some((f) => f.type.startsWith("image/"))) return false;

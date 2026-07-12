@@ -74,6 +74,8 @@ export const api = {
   openInBrowser: (id: string) => invoke<null>("open_in_browser", { id }),
   /** Bake an hdoc to a temp HTML file and open it in the system browser. */
   previewHdoc: (id: string) => invoke<null>("preview_hdoc", { id }),
+  /** Read one image off the system clipboard as a PNG data: URL (or null). */
+  readClipboardImage: () => invoke<string | null>("read_clipboard_image"),
   openUrl: (url: string) => invoke<null>("open_url", { url }),
   revealFolder: (rel: string) => invoke<null>("reveal_folder", { rel }),
   createFolder: (parent: string, name: string) =>

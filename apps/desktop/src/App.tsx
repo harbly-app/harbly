@@ -127,6 +127,8 @@ export default function App() {
           else void st.copyFiles();
           break;
         case "paste":
+          // Editors own paste at the DOM paste event (the forwarded native
+          // paste: dispatches one); the menu only routes text vs. files here.
           if (editableFocused()) api.forwardEdit("paste").catch(() => {});
           else void st.pasteFiles(false);
           break;
