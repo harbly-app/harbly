@@ -93,6 +93,7 @@ pub fn run() {
             let lang = commands::saved_lang(app.handle());
             *app.state::<state::AppState>().lang.lock().unwrap() = lang.clone();
             menu::setup(app.handle(), &lang)?;
+            menu::attach_event_bridge(app.handle());
             commands::try_autoload(app.handle().clone());
             Ok(())
         })
