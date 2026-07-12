@@ -369,6 +369,80 @@ pub async fn asset_new_markdown(
     Ok(a)
 }
 
+/// Create a new page document (.hdoc) from the skeleton and open it (undoable)
+#[tauri::command]
+pub async fn asset_new_hdoc(
+    app: AppHandle,
+    folder: String,
+    name: Option<String>,
+) -> Result<harbly_core::AssetMeta, String> {
+    let lib = app.state::<AppState>().lib()?;
+    let t = crate::i18n::l(&cur_lang(&app));
+    let stem = name
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| t.untitled.to_string());
+    let lib2 = lib.clone();
+    let a = tauri::async_runtime::spawn_blocking(move || lib2.create_hdoc_asset(&folder, &stem))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    record_op(
+        &app,
+        FileOp::Created {
+            paths: vec![lib.abs(&a.rel_path)],
+        },
+        crate::i18n::tpl(t.op_new_md, &a.file_name),
+    );
+    enqueue_missing_thumbs(&app);
+    let _ = app.emit("library-changed", ());
+    Ok(a)
+}
+
+/// Export an hdoc page as a baked, self-contained HTML file: the component
+/// runtime is embedded (no CSP, no nonce, no rewrite base) so the file opens
+/// anywhere, independent of Harbly.
+#[tauri::command]
+pub async fn export_hdoc_html(app: AppHandle, id: String) -> Result<Option<String>, String> {
+    let lib = app.state::<AppState>().lib()?;
+    let a = lib.asset(&id).map_err(|e| e.to_string())?;
+    let src = lib.asset_abs_path(&id).map_err(|e| e.to_string())?;
+    let text = std::fs::read_to_string(&src).map_err(|e| e.to_string())?;
+    let lang = cur_lang(&app);
+    let t = crate::i18n::l(&lang);
+    let page = crate::hdoc_template::render_page(
+        &text,
+        &crate::hdoc_template::HdocRender {
+            lang: &lang,
+            toc_label: t.toc,
+            rel_base: None,
+            nonce: None,
+        },
+    );
+    let stem = a
+        .file_name
+        .rsplit_once('.')
+        .map(|(s, _)| s.to_string())
+        .unwrap_or_else(|| a.file_name.clone());
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let dest = app2
+            .dialog()
+            .file()
+            .set_file_name(format!("{stem}.html"))
+            .blocking_save_file()
+            .and_then(|f| f.into_path().ok());
+        match dest {
+            Some(d) => std::fs::write(&d, page.as_bytes())
+                .map(|_| Some(d.to_string_lossy().to_string()))
+                .map_err(|e| e.to_string()),
+            None => Ok(None),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn import_paths(
     app: AppHandle,
@@ -417,7 +491,10 @@ pub async fn pick_and_import(
     let files: Vec<String> = tauri::async_runtime::spawn_blocking(move || {
         app2.dialog()
             .file()
-            .add_filter("HTML / Markdown", &["html", "htm", "md", "markdown"])
+            .add_filter(
+                "HTML / Markdown / Harbly Page",
+                &["html", "htm", "md", "markdown", "hdoc"],
+            )
             .blocking_pick_files()
             .unwrap_or_default()
             .into_iter()
@@ -792,6 +869,36 @@ pub async fn open_in_browser(app: AppHandle, id: String) -> Result<(), String> {
         .asset_abs_path(&id)
         .map_err(|e| e.to_string())?;
     open_with_system(&p, false)
+}
+
+/// Preview an hdoc page in the system browser without exporting: bake the same
+/// standalone HTML as the export into a temp file and open it. Relative media
+/// resolve against the source folder through a file:// base, so the throwaway
+/// copy still shows images. The `.hdoc` extension has no default app, so this
+/// replaces "open with default app" for hdoc pages.
+#[tauri::command]
+pub async fn preview_hdoc(app: AppHandle, id: String) -> Result<(), String> {
+    let lib = app.state::<AppState>().lib()?;
+    let src = lib.asset_abs_path(&id).map_err(|e| e.to_string())?;
+    let text = std::fs::read_to_string(&src).map_err(|e| e.to_string())?;
+    let lang = cur_lang(&app);
+    let t = crate::i18n::l(&lang);
+    let rel_base = src
+        .parent()
+        .and_then(|d| url::Url::from_directory_path(d).ok())
+        .map(|u| u.to_string());
+    let page = crate::hdoc_template::render_page(
+        &text,
+        &crate::hdoc_template::HdocRender {
+            lang: &lang,
+            toc_label: t.toc,
+            rel_base: rel_base.as_deref(),
+            nonce: None,
+        },
+    );
+    let dest = std::env::temp_dir().join(format!("harbly-preview-{id}.html"));
+    std::fs::write(&dest, page.as_bytes()).map_err(|e| e.to_string())?;
+    open_with_system(&dest, false)
 }
 
 #[tauri::command]
@@ -1253,6 +1360,15 @@ pub async fn forward_edit_action(app: AppHandle, action: String) -> Result<(), S
     on_main(&app, move || {
         crate::pasteboard::forward_responder_action(&action)
     })?
+}
+
+/// Read one image off the system clipboard as a PNG data: URL (None if there is
+/// no image). The rich editor uses this instead of the native paste so a single
+/// clipboard image lands as a single figure — the native paste would insert one
+/// copy per clipboard format.
+#[tauri::command]
+pub async fn read_clipboard_image(app: AppHandle) -> Result<Option<String>, String> {
+    on_main(&app, crate::pasteboard::read_image_data_url)
 }
 
 /// Open an external link in the default browser (used by links inside AI

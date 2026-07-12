@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./lib/api";
 import { makeT } from "./lib/i18n";
 import { useStore } from "./lib/store";
-import { INBOX, isMd } from "./lib/types";
+import { INBOX, isHdoc, isMd } from "./lib/types";
 import Onboarding from "./components/Onboarding";
 import TitleBar from "./components/TitleBar";
 import Sidebar from "./components/Sidebar";
@@ -58,10 +58,13 @@ export default function App() {
           el.isContentEditable)
       );
     };
-    // Focus is inside the Markdown editor: ⌘Z/⌘⇧Z must drive ProseMirror's own
-    // history (execCommand has no effect on it), so route to the editor handle
+    // Focus is inside the Markdown or page editor: ⌘Z/⌘⇧Z must drive
+    // ProseMirror's own history (execCommand has no effect on it), so route to
+    // the editor handle
     const editorFocused = () =>
-      !!(document.activeElement as HTMLElement | null)?.closest(".milkdown");
+      !!(document.activeElement as HTMLElement | null)?.closest(
+        ".milkdown, .hdoc-editor",
+      );
     const hasTextSelection = () => {
       const sel = window.getSelection();
       return !!sel && !sel.isCollapsed;
@@ -77,6 +80,9 @@ export default function App() {
           break;
         case "new-md":
           void st.newMarkdown();
+          break;
+        case "new-hdoc":
+          void st.newHdoc();
           break;
         case "new-folder":
           st.setModal({
@@ -121,6 +127,8 @@ export default function App() {
           else void st.copyFiles();
           break;
         case "paste":
+          // Editors own paste at the DOM paste event (the forwarded native
+          // paste: dispatches one); the menu only routes text vs. files here.
           if (editableFocused()) api.forwardEdit("paste").catch(() => {});
           else void st.pasteFiles(false);
           break;
@@ -157,10 +165,15 @@ export default function App() {
         .onDragDropEvent((event) => {
           const st = useStore.getState();
           if (st.phase !== "main") return;
-          // Inside the Markdown editor, dragging a block handle is an internal
-          // reorder that Tauri's OS drag layer also reports; don't hijack it with
-          // the file-import overlay (an internal drag carries no file paths anyway).
-          if (st.viewerAsset && isMd(st.viewerAsset.fileName)) return;
+          // Inside the Markdown/page editor, dragging a block handle is an
+          // internal reorder that Tauri's OS drag layer also reports; don't
+          // hijack it with the file-import overlay (an internal drag carries no
+          // file paths anyway).
+          if (
+            st.viewerAsset &&
+            (isMd(st.viewerAsset.fileName) || isHdoc(st.viewerAsset.fileName))
+          )
+            return;
           const p = event.payload;
           if (p.type === "enter" || p.type === "over") st.setDragOver(true);
           else if (p.type === "drop") {

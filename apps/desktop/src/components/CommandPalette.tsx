@@ -3,6 +3,7 @@ import {
   FilePlus2,
   FileText,
   FolderPlus,
+  LayoutTemplate,
   RefreshCw,
   FileCode2,
   Sparkles,
@@ -13,7 +14,7 @@ import { api } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import type { SearchHit } from "../lib/types";
-import { INBOX, isMd } from "../lib/types";
+import { INBOX, isHdoc, isMd } from "../lib/types";
 
 export default function CommandPalette() {
   const open = useStore((s) => s.paletteOpen);
@@ -93,6 +94,8 @@ function PaletteBody() {
               >
                 {isMd(h.asset.fileName) ? (
                   <FileText className="h-4 w-4 shrink-0 text-sub" />
+                ) : isHdoc(h.asset.fileName) ? (
+                  <LayoutTemplate className="h-4 w-4 shrink-0 text-sub" />
                 ) : (
                   <FileCode2 className="h-4 w-4 shrink-0 text-sub" />
                 )}
@@ -145,6 +148,21 @@ function PaletteBody() {
               <span className="flex-1" />
               <kbd className="rounded border border-line bg-side px-1.5 py-0.5 text-[10px] text-sub">
                 ⌘N
+              </kbd>
+            </Command.Item>
+            <Command.Item
+              value="cmd-newhdoc"
+              onSelect={() => {
+                setPalette(false);
+                void st().newHdoc();
+              }}
+              className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 data-[selected=true]:bg-primary/10"
+            >
+              <LayoutTemplate className="h-4 w-4 shrink-0 text-primary" />
+              <span className="text-[12.5px]">{t("newHdocCmd")}</span>
+              <span className="flex-1" />
+              <kbd className="rounded border border-line bg-side px-1.5 py-0.5 text-[10px] text-sub">
+                ⌥⌘N
               </kbd>
             </Command.Item>
             {q.trim() && (

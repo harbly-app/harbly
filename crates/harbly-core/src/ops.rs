@@ -527,7 +527,7 @@ impl Library {
         // user typed, then re-append the asset's own current extension.
         if let Some(ext) = crate::ext_of(&cur.rel_path) {
             let lower = name.to_ascii_lowercase();
-            for m in ["html", "htm", "md", "markdown"] {
+            for m in ["html", "htm", "md", "markdown", "hdoc"] {
                 if lower.ends_with(&format!(".{m}")) {
                     name.truncate(name.len() - (m.len() + 1));
                     break;
@@ -716,6 +716,28 @@ impl Library {
     /// is the (already localized) base name; a ".md" extension and a uniqueness
     /// suffix are applied here.
     pub fn create_markdown_asset(&self, folder: &str, name_stem: &str) -> Result<AssetMeta> {
+        self.create_text_asset(folder, name_stem, "md", b"")
+    }
+
+    /// Create a new page document (.hdoc) from the empty skeleton and register it.
+    pub fn create_hdoc_asset(&self, folder: &str, name_stem: &str) -> Result<AssetMeta> {
+        self.create_text_asset(
+            folder,
+            name_stem,
+            "hdoc",
+            crate::HDOC_NEW_TEMPLATE.as_bytes(),
+        )
+    }
+
+    /// Shared "new file" path: write `content` as `{stem}.{ext}` (uniquified) in
+    /// `folder` and register it with the "新建" version label.
+    fn create_text_asset(
+        &self,
+        folder: &str,
+        name_stem: &str,
+        ext: &str,
+        content: &[u8],
+    ) -> Result<AssetMeta> {
         let dir = if folder.is_empty() {
             self.root().to_path_buf()
         } else {
@@ -726,10 +748,10 @@ impl Library {
         if stem.is_empty() {
             stem = "Untitled".to_string();
         }
-        let name = unique_name(&dir, &format!("{stem}.md"));
+        let name = unique_name(&dir, &format!("{stem}.{ext}"));
         let abs = dir.join(&name);
-        std::fs::write(&abs, b"")?;
-        let hash = blake3::hash(b"").to_hex().to_string();
+        std::fs::write(&abs, content)?;
+        let hash = blake3::hash(content).to_hex().to_string();
         let md = std::fs::metadata(&abs)?;
         let rel = if folder.is_empty() {
             name.clone()
@@ -738,7 +760,7 @@ impl Library {
         };
         let id = self.insert_new_asset(
             &rel,
-            b"",
+            content,
             &hash,
             md.len() as i64,
             crate::mtime_secs(&md),

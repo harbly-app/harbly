@@ -7,9 +7,11 @@ import {
   ExternalLink,
   Eye,
   FileCode2,
+  FileDown,
   FileText,
   FolderInput,
   FolderOpen,
+  LayoutTemplate,
   PencilLine,
   Sparkles,
   Tag as TagIcon,
@@ -21,7 +23,7 @@ import { makeT } from "../lib/i18n";
 import { dragJustEnded, useStore } from "../lib/store";
 import type { DragPayload } from "../lib/store";
 import type { AssetMeta, SortKey } from "../lib/types";
-import { INBOX, isMd, stemName } from "../lib/types";
+import { INBOX, isHdoc, isMd, stemName } from "../lib/types";
 import { dragStartHandler } from "../lib/drag";
 import { menuContentCls, MItem, MSep } from "./menu";
 import RenameInput from "./RenameInput";
@@ -300,15 +302,19 @@ function EmptyState({ inbox }: { inbox: boolean }) {
 function Thumb({
   hash,
   epoch,
-  md,
+  name,
 }: {
   hash: string;
   epoch: number;
-  md: boolean;
+  name: string;
 }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
-    const Icon = md ? FileText : FileCode2;
+    const Icon = isMd(name)
+      ? FileText
+      : isHdoc(name)
+        ? LayoutTemplate
+        : FileCode2;
     return (
       <div className="grid h-full w-full place-items-center text-sub">
         <Icon className="h-7 w-7" />
@@ -405,7 +411,7 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
               key={`${a.currentHash}:${epoch}`}
               hash={a.currentHash}
               epoch={epoch}
-              md={isMd(a.fileName)}
+              name={a.fileName}
             />
           </div>
           <div className="px-3 py-2.5">
@@ -497,11 +503,17 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
               <MItem
                 icon={<ExternalLink className="h-3.5 w-3.5" />}
                 label={
-                  isMd(a.fileName)
-                    ? t("openWithDefaultApp")
-                    : t("openInBrowser")
+                  isHdoc(a.fileName)
+                    ? t("previewInBrowser")
+                    : isMd(a.fileName)
+                      ? t("openWithDefaultApp")
+                      : t("openInBrowser")
                 }
-                onClick={() => api.openInBrowser(a.id).catch(() => {})}
+                onClick={() =>
+                  isHdoc(a.fileName)
+                    ? api.previewHdoc(a.id).catch(() => {})
+                    : api.openInBrowser(a.id).catch(() => {})
+                }
               />
               <MItem
                 icon={<FolderOpen className="h-3.5 w-3.5" />}
@@ -554,6 +566,13 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
                 label={t("exportCopy")}
                 onClick={() => st().doExportAsset(a.id)}
               />
+              {isHdoc(a.fileName) && (
+                <MItem
+                  icon={<FileDown className="h-3.5 w-3.5" />}
+                  label={t("exportHdocCmd")}
+                  onClick={() => st().doExportHdoc(a.id)}
+                />
+              )}
               <MSep />
               <MItem
                 danger

@@ -23,6 +23,18 @@ const MD_CSP: &str = "default-src 'none'; script-src 'none'; style-src 'unsafe-i
     img-src harbly-asset: data: blob:; font-src harbly-asset: data:; media-src harbly-asset: data: blob:; \
     connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'";
 
+/// hdoc render: the document is content, not an app — only the injected runtime
+/// (identified by the per-response nonce) may run; media resolve through the
+/// asset protocol's sibling-file route.
+fn hdoc_csp(nonce: &str) -> String {
+    format!(
+        "default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; \
+        img-src harbly-asset: data: blob:; font-src harbly-asset: data:; \
+        media-src harbly-asset: data: blob:; connect-src 'none'; form-action 'none'; \
+        base-uri 'none'; object-src 'none'"
+    )
+}
+
 /// Injected into every previewed page: (1) CSP-violation counter for the
 /// "N blocked" pill; (2) app-shortcut forwarding — the preview iframe is
 /// cross-origin, so once it has focus the host window would never see
@@ -126,12 +138,12 @@ pub fn asset_protocol<R: Runtime>(
 
     // Markdown is rendered server-side to a self-contained HTML document (used by
     // the thumbnail pipeline); relative images point back at the rel/ route.
-    let is_md = file
+    let ext = file
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| matches!(e.to_ascii_lowercase().as_str(), "md" | "markdown"))
-        .unwrap_or(false);
-    if is_md {
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if matches!(ext.as_str(), "md" | "markdown") {
         let Ok(text) = std::fs::read_to_string(&file) else {
             return not_found();
         };
@@ -143,6 +155,36 @@ pub fn asset_protocol<R: Runtime>(
             200,
             "text/html; charset=utf-8",
             Some(MD_CSP),
+            page.into_bytes(),
+        );
+    }
+
+    // hdoc pages: wrap the raw source with the component runtime. Like Markdown,
+    // the document itself must never execute scripts — the CSP honors only the
+    // per-response nonce carried by the injected runtime, so any <script> inside
+    // the (possibly AI-written) source is inert.
+    if ext == "hdoc" {
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            return not_found();
+        };
+        let lang = state.lang.lock().unwrap().clone();
+        let t = crate::i18n::l(&lang);
+        let nonce = uuid::Uuid::new_v4().simple().to_string();
+        let base = format!("harbly-asset://localhost/rel/{asset_id}/");
+        let page = crate::hdoc_template::render_page(
+            &text,
+            &crate::hdoc_template::HdocRender {
+                lang: &lang,
+                toc_label: t.toc,
+                rel_base: Some(&base),
+                nonce: Some(&nonce),
+            },
+        );
+        let csp = hdoc_csp(&nonce);
+        return resp(
+            200,
+            "text/html; charset=utf-8",
+            Some(&csp),
             page.into_bytes(),
         );
     }

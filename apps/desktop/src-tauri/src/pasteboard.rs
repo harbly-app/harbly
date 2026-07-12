@@ -53,6 +53,43 @@ pub fn read_file_paths() -> Vec<PathBuf> {
     }
 }
 
+/// Read a single image off the pasteboard as a PNG `data:` URL, or None if it
+/// holds no image. A clipboard image is usually present in several formats at
+/// once (PNG + TIFF + …); the webview's native paste inserts one copy per
+/// format, so the rich editor reads exactly one representation here instead and
+/// skips the native paste. Screenshots and most copies already carry a PNG;
+/// otherwise an NSImage is pulled and re-encoded to PNG.
+#[cfg(target_os = "macos")]
+pub fn read_image_data_url() -> Option<String> {
+    use base64::Engine;
+    use objc2::{AllocAnyThread, ClassType};
+    use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSImage, NSPasteboard};
+    use objc2_foundation::{NSArray, NSDictionary, NSString};
+
+    let png: Vec<u8> = unsafe {
+        let pb = NSPasteboard::generalPasteboard();
+        let png_type = NSString::from_str("public.png");
+        if let Some(data) = pb.dataForType(&png_type) {
+            data.to_vec()
+        } else {
+            let classes = NSArray::from_slice(&[NSImage::class()]);
+            let objs = pb.readObjectsForClasses_options(&classes, None)?;
+            let img = objs.iter().find_map(|o| o.downcast::<NSImage>().ok())?;
+            let tiff = img.TIFFRepresentation()?;
+            let rep = NSBitmapImageRep::initWithData(NSBitmapImageRep::alloc(), &tiff)?;
+            let props = NSDictionary::new();
+            let data =
+                rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &props)?;
+            data.to_vec()
+        }
+    };
+    if png.is_empty() {
+        return None;
+    }
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+    Some(format!("data:image/png;base64,{b64}"))
+}
+
 /// Send an edit action to the first responder (equivalent to what the system's
 /// predefined menu items do). Must be called on the main thread.
 #[cfg(target_os = "macos")]
@@ -89,4 +126,49 @@ pub fn read_file_paths() -> Vec<PathBuf> {
 #[cfg(not(target_os = "macos"))]
 pub fn forward_responder_action(_: &str) -> Result<(), String> {
     Ok(())
+}
+#[cfg(not(target_os = "macos"))]
+pub fn read_image_data_url() -> Option<String> {
+    None
+}
+
+// Headless native-layer test: put one image on the real pasteboard in several
+// formats at once (as a real copy does) and assert the reader returns exactly
+// one PNG data: URL — the property the desktop paste fix relies on. Ignored by
+// default because it clobbers the shared system clipboard; run explicitly with
+// `cargo test -p harbly-app -- --ignored reads_a_single_png`.
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::read_image_data_url;
+    use base64::Engine;
+    use objc2_app_kit::NSPasteboard;
+    use objc2_foundation::{NSArray, NSData, NSString};
+
+    const PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+
+    #[test]
+    #[ignore = "reads/writes the shared system clipboard"]
+    fn reads_a_single_png_from_a_multi_format_clipboard() {
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(PNG_B64)
+            .unwrap();
+        unsafe {
+            let pb = NSPasteboard::generalPasteboard();
+            let png_type = NSString::from_str("public.png");
+            let tiff_type = NSString::from_str("public.tiff");
+            let types = NSArray::from_slice(&[&*png_type, &*tiff_type]);
+            pb.clearContents();
+            pb.declareTypes_owner(&types, None);
+            let data = NSData::with_bytes(&png);
+            pb.setData_forType(Some(&data), &png_type);
+            pb.setData_forType(Some(&data), &tiff_type);
+        }
+        let url = read_image_data_url().expect("an image should be read");
+        assert!(
+            url.starts_with("data:image/png;base64,"),
+            "unexpected prefix: {}",
+            &url[..url.len().min(48)]
+        );
+        assert!(url.len() > "data:image/png;base64,".len());
+    }
 }

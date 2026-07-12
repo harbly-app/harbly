@@ -4,12 +4,14 @@ import { api, assetUrl } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import type { TFn } from "../lib/i18n";
 import { useStore } from "../lib/store";
-import { isMd } from "../lib/types";
+import { isHdoc, isMd } from "../lib/types";
 import type { AssetMeta } from "../lib/types";
 
 // Lazy: the Milkdown editor (and its Vue/CodeMirror runtime) only loads once a
 // Markdown file is actually opened, keeping HTML-only sessions lean.
 const MarkdownEditor = lazy(() => import("./MarkdownEditor"));
+// Lazy for the same reason: ProseMirror only loads when a page is opened.
+const HdocEditor = lazy(() => import("./HdocEditor"));
 
 /// Viewer embedded in the content area: file name and actions live in the window title bar (TitleBar),
 /// so this is just the preview itself — no second mini title bar
@@ -23,6 +25,9 @@ export default function Viewer() {
   // (lives here, above the per-file remounts, so it is registered once)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // An editor plugin already consumed this key (e.g. Esc closing the
+      // slash menu) — don't also blur / close the viewer on the same press.
+      if (e.defaultPrevented) return;
       const st = useStore.getState();
       const va = st.viewerAsset;
       if (st.paletteOpen || st.modal || !va) return;
@@ -59,14 +64,23 @@ export default function Viewer() {
   }, []);
 
   if (!a) return null;
-  // Markdown opens in the WYSIWYG editor; HTML in the sandboxed preview.
-  // (The AI panel lives one level up, in App — it is library-scoped now.)
+  // Markdown and pages open in their WYSIWYG editors; HTML in the sandboxed
+  // preview. (The AI panel lives one level up, in App — it is library-scoped.)
   if (isMd(a.fileName)) {
     return (
       <Suspense
         fallback={<div className="flex-1 bg-paper" aria-hidden="true" />}
       >
         <MarkdownEditor key={a.id} asset={a} />
+      </Suspense>
+    );
+  }
+  if (isHdoc(a.fileName)) {
+    return (
+      <Suspense
+        fallback={<div className="flex-1 bg-paper" aria-hidden="true" />}
+      >
+        <HdocEditor key={a.id} asset={a} />
       </Suspense>
     );
   }

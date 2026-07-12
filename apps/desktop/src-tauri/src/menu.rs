@@ -9,6 +9,11 @@ use tauri::{AppHandle, Emitter};
 /// routes by focus: inside an input field the action is forwarded back to the system
 /// responder chain (text editing works as usual), otherwise it acts on files (Finder
 /// semantics). On language switch, the menu is rebuilt wholesale with the matching strings.
+///
+/// Rebuilding must NOT re-attach the event bridge: `on_menu_event` stacks
+/// handlers instead of replacing, so every set_language (one at startup, twice
+/// under React StrictMode's double boot) added another handler and each menu
+/// click fired N times — one ⌘V pasted an image three times.
 pub fn setup(app: &AppHandle, lang: &str) -> tauri::Result<()> {
     let t = i18n::l(lang);
 
@@ -38,6 +43,11 @@ pub fn setup(app: &AppHandle, lang: &str) -> tauri::Result<()> {
         .item(
             &MenuItemBuilder::with_id("new-md", t.new_md)
                 .accelerator("CmdOrCtrl+N")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("new-hdoc", t.new_hdoc)
+                .accelerator("CmdOrCtrl+Alt+N")
                 .build(app)?,
         )
         .item(
@@ -127,8 +137,13 @@ pub fn setup(app: &AppHandle, lang: &str) -> tauri::Result<()> {
 
     let menu = Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window])?;
     app.set_menu(menu)?;
+    Ok(())
+}
+
+/// Forward menu clicks to the frontend. Attached exactly once at startup —
+/// never from setup(), which set_language re-runs (see above).
+pub fn attach_event_bridge(app: &AppHandle) {
     app.on_menu_event(|app, event| {
         let _ = app.emit("menu-action", event.id().0.clone());
     });
-    Ok(())
 }

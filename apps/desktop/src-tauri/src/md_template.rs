@@ -16,8 +16,8 @@ pub fn render_page(body_html: &str, lang: &str) -> String {
 }
 
 /// Keep only ASCII letters, digits and '-' from the language tag so it can never
-/// break out of the attribute.
-fn sanitize_lang(lang: &str) -> String {
+/// break out of the attribute. Shared with the hdoc template.
+pub(crate) fn sanitize_lang(lang: &str) -> String {
     let s: String = lang
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')

@@ -80,6 +80,12 @@ export default defineConfig([
     languageOptions: { globals: globals.node },
   },
 
+  // Browser-runtime assets embedded by the Rust shell (hdoc runtime script)
+  {
+    files: ["apps/desktop/src-tauri/assets/**/*.js"],
+    languageOptions: { globals: globals.browser },
+  },
+
   // Must stay last: disables anything that would fight Prettier
   prettier,
 ]);

@@ -1,5 +1,6 @@
 mod ai;
 mod commands;
+mod hdoc_template;
 mod i18n;
 mod md_template;
 mod menu;
@@ -36,6 +37,8 @@ pub fn run() {
             commands::asset_write,
             commands::asset_checkpoint,
             commands::asset_new_markdown,
+            commands::asset_new_hdoc,
+            commands::export_hdoc_html,
             commands::import_paths,
             commands::pick_and_import,
             commands::search_assets,
@@ -44,6 +47,7 @@ pub fn run() {
             commands::assets_trash,
             commands::reveal_asset,
             commands::open_in_browser,
+            commands::preview_hdoc,
             commands::open_url,
             commands::reveal_folder,
             commands::create_folder,
@@ -67,6 +71,7 @@ pub fn run() {
             commands::pasteboard_copy,
             commands::pasteboard_paste,
             commands::forward_edit_action,
+            commands::read_clipboard_image,
             commands::set_language,
             commands::get_language,
             ai::ai_detect_agents,
@@ -89,6 +94,7 @@ pub fn run() {
             let lang = commands::saved_lang(app.handle());
             *app.state::<state::AppState>().lang.lock().unwrap() = lang.clone();
             menu::setup(app.handle(), &lang)?;
+            menu::attach_event_bridge(app.handle());
             commands::try_autoload(app.handle().clone());
             Ok(())
         })

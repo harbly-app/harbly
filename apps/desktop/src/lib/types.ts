@@ -147,6 +147,9 @@ export const INBOX = "_inbox";
 /** A Markdown asset — opened in the editor rather than the preview iframe. */
 export const isMd = (name: string) => /\.(md|markdown)$/i.test(name);
 
-/** Display name with the managed extension stripped (HTML or Markdown). */
+/** A page document (.hdoc) — opened in the block editor. */
+export const isHdoc = (name: string) => /\.hdoc$/i.test(name);
+
+/** Display name with the managed extension stripped. */
 export const stemName = (name: string) =>
-  name.replace(/\.(html?|md|markdown)$/i, "");
+  name.replace(/\.(html?|md|markdown|hdoc)$/i, "");

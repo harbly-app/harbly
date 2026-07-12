@@ -38,6 +38,11 @@ export const api = {
     invoke<boolean>("asset_checkpoint", { id, baseHash }),
   newMarkdown: (folder: string, name?: string) =>
     invoke<AssetMeta>("asset_new_markdown", { folder, name: name ?? null }),
+  newHdoc: (folder: string, name?: string) =>
+    invoke<AssetMeta>("asset_new_hdoc", { folder, name: name ?? null }),
+  /** Bake an hdoc into a standalone HTML file via a save dialog. */
+  exportHdocHtml: (id: string) =>
+    invoke<string | null>("export_hdoc_html", { id }),
   importPaths: (paths: string[], dest: string) =>
     invoke<ImportResult>("import_paths", { paths, dest }),
   pickAndImport: (dest: string) =>
@@ -67,6 +72,10 @@ export const api = {
   getLanguage: () => invoke<string>("get_language"),
   revealAsset: (id: string) => invoke<null>("reveal_asset", { id }),
   openInBrowser: (id: string) => invoke<null>("open_in_browser", { id }),
+  /** Bake an hdoc to a temp HTML file and open it in the system browser. */
+  previewHdoc: (id: string) => invoke<null>("preview_hdoc", { id }),
+  /** Read one image off the system clipboard as a PNG data: URL (or null). */
+  readClipboardImage: () => invoke<string | null>("read_clipboard_image"),
   openUrl: (url: string) => invoke<null>("open_url", { url }),
   revealFolder: (rel: string) => invoke<null>("reveal_folder", { rel }),
   createFolder: (parent: string, name: string) =>
