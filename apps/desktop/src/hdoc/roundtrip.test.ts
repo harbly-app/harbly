@@ -52,7 +52,7 @@ const FULL = `<h-doc v="1" theme="sepia">
   <h-details summary="更多细节" open>
     <p>展开后的内容。</p>
   </h-details>
-  <h-figure caption="架构图"><img src="images/arch.png" alt="arch"></h-figure>
+  <h-figure width="60" align="left"><img src="images/arch.png" alt="arch"></h-figure>
   <blockquote>
     <p>原生引用块。</p>
   </blockquote>
@@ -187,7 +187,7 @@ describe("hdoc round-trip", () => {
     const data =
       "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
     const p = parseHdoc(
-      `<h-doc v="1"><h-figure caption="c"><img src="${data}" alt="a"></h-figure></h-doc>`,
+      `<h-doc v="1"><h-figure><img src="${data}" alt="a"></h-figure></h-doc>`,
     );
     expect(p.ok).toBe(true);
     if (!p.ok) return;

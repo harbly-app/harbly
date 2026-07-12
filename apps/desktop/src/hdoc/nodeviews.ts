@@ -156,21 +156,32 @@ class ComponentView implements NodeView {
   }
 }
 
-/** h-figure: image preview + src/caption inputs. The src input edits the child
- * image node (position = own pos + 1); relative paths display through the
- * sibling-file protocol route without changing what is stored. */
+const FIG_MIN_PCT = 10;
+
+const ALIGN_ICONS: Record<string, string> = {
+  left: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="5" x2="21" y2="5"/><rect x="3" y="9" width="11" height="10" rx="1"/><line x1="3" y1="19" x2="21" y2="19"/></svg>',
+  center:
+    '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="5" x2="21" y2="5"/><rect x="6.5" y="9" width="11" height="10" rx="1"/><line x1="3" y1="19" x2="21" y2="19"/></svg>',
+  right:
+    '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="5" x2="21" y2="5"/><rect x="10" y="9" width="11" height="10" rx="1"/><line x1="3" y1="19" x2="21" y2="19"/></svg>',
+};
+
+/** h-figure: image preview with editor-only chrome — resize handles on the
+ * image edges and a hover toolbar (align left/center/right + 1:1 natural
+ * size). Sizing is stored on the figure node: width = % of the text column
+ * ("" = natural), align = "left" | "right" ("" = centered). The src input
+ * edits the child image node (position = own pos + 1) and only shows for
+ * external URLs; embedded data: images hide it. */
 class FigureView extends ComponentView {
+  private pickBtn!: HTMLButtonElement;
+  private toolBtns = new Map<string, HTMLButtonElement>();
+  private handles: HTMLDivElement[] = [];
+  private tools!: HTMLDivElement;
+
   constructor(node: PMNode, view: EditorView, getPos: GetPos) {
     super(
       "h-figure",
-      [
-        { attr: "src", ph: "insImage", className: "hd-attr-src" },
-        {
-          attr: "caption",
-          ph: "hdocTitlePlaceholder",
-          className: "hd-attr-caption",
-        },
-      ],
+      [{ attr: "src", ph: "insImage", className: "hd-attr-src" }],
       node,
       view,
       getPos,
@@ -197,18 +208,22 @@ class FigureView extends ComponentView {
       const url = await imageToDataUrl(file).catch(() => null);
       if (url) setSrc(url);
     };
-    const pickBtn = document.createElement("button");
-    pickBtn.type = "button";
-    pickBtn.className = "hd-attr hd-pick-img";
-    pickBtn.textContent = tr("hdocPickImage");
-    pickBtn.addEventListener("click", () => void pick());
-    this.dom.querySelector(".hd-fields")?.prepend(pickBtn);
+    this.pickBtn = document.createElement("button");
+    this.pickBtn.type = "button";
+    this.pickBtn.className = "hd-attr hd-pick-img";
+    this.pickBtn.textContent = tr("hdocPickImage");
+    this.pickBtn.addEventListener("click", () => void pick());
+    this.dom.querySelector(".hd-fields")?.prepend(this.pickBtn);
     // The empty placeholder is itself a click target for picking.
     this.dom.addEventListener("click", (e) => {
       const el = e.target as HTMLElement;
       if (el.tagName === "IMG" && el.classList.contains("hd-img-empty"))
         void pick();
     });
+
+    this.buildChrome(view, getPos);
+    this.syncFigure();
+    this.dom.addEventListener("mouseenter", () => this.placeChrome());
   }
 
   protected override setAttr(
@@ -221,21 +236,160 @@ class FigureView extends ComponentView {
     super.setAttr(view, getPos, attr, value);
   }
 
-  /** Mirror the image's src into the text input, but show an embedded data:
-   * URL (thousands of chars) as a friendly marker instead of the raw base64. */
+  private img(): HTMLImageElement | null {
+    return this.dom.querySelector(".hd-body img");
+  }
+
+  /** Alignment toolbar + resize handles. Both live outside contentDOM, are
+   * hidden until hover (CSS) and positioned against the rendered image. */
+  private buildChrome(view: EditorView, getPos: GetPos) {
+    this.tools = document.createElement("div");
+    this.tools.className = "hd-fig-ui hd-fig-tools";
+    this.tools.contentEditable = "false";
+    const btn = (
+      key: string,
+      labelKey: string,
+      content: string,
+      apply: () => void,
+    ) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "hd-fig-tool";
+      b.title = tr(labelKey);
+      if (content.startsWith("<svg")) b.innerHTML = content;
+      else b.textContent = content;
+      // preventDefault so the editor selection/focus stays put
+      b.addEventListener("mousedown", (e) => e.preventDefault());
+      b.addEventListener("click", apply);
+      this.toolBtns.set(key, b);
+      this.tools.appendChild(b);
+    };
+    btn("left", "hdocAlignLeft", ALIGN_ICONS.left, () =>
+      this.setAttr(view, getPos, "align", "left"),
+    );
+    btn("center", "hdocAlignCenter", ALIGN_ICONS.center, () =>
+      this.setAttr(view, getPos, "align", ""),
+    );
+    btn("right", "hdocAlignRight", ALIGN_ICONS.right, () =>
+      this.setAttr(view, getPos, "align", "right"),
+    );
+    btn("reset", "hdocOriginalSize", "1:1", () =>
+      this.setAttr(view, getPos, "width", ""),
+    );
+    this.dom.appendChild(this.tools);
+
+    for (const side of [-1, 1] as const) {
+      const h = document.createElement("div");
+      h.className = "hd-fig-ui hd-fig-handle";
+      h.contentEditable = "false";
+      h.addEventListener("mousedown", (e) =>
+        this.startResize(view, getPos, side, e),
+      );
+      this.handles.push(h);
+      this.dom.appendChild(h);
+    }
+  }
+
+  /** Drag a side handle → width as % of the text column, one transaction on
+   * release (a single undo step). The CSS variable previews live. */
+  private startResize(
+    view: EditorView,
+    getPos: GetPos,
+    side: -1 | 1,
+    e: MouseEvent,
+  ) {
+    const img = this.img();
+    const colW = this.dom.clientWidth;
+    if (!img || colW <= 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = img.getBoundingClientRect().width;
+    // A centered image grows on both sides, so pointer travel counts double.
+    const factor = String(this.node.attrs.align ?? "") === "" ? 2 : 1;
+    let pct = 0;
+    this.dom.classList.add("hd-resizing");
+    const move = (ev: MouseEvent) => {
+      const w = startW + (ev.clientX - startX) * side * factor;
+      pct = Math.round(Math.max(FIG_MIN_PCT, Math.min(100, (w / colW) * 100)));
+      this.dom.style.setProperty("--hd-fig-w", `${pct}%`);
+      this.placeChrome();
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      this.dom.classList.remove("hd-resizing");
+      this.syncFigure(); // back to the attr-driven width…
+      if (pct) this.setAttr(view, getPos, "width", String(pct)); // …then commit
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  }
+
+  /** Pin the handles to the image's edges and the toolbar to its top-right
+   * (the image moves with alignment, so static CSS can't place them). */
+  private placeChrome() {
+    const img = this.img();
+    if (!img) return;
+    const fr = this.dom.getBoundingClientRect();
+    const ir = img.getBoundingClientRect();
+    this.handles.forEach((h, i) => {
+      h.style.left = `${(i === 0 ? ir.left : ir.right) - fr.left}px`;
+      h.style.top = `${ir.top - fr.top}px`;
+      h.style.height = `${ir.height}px`;
+    });
+    this.tools.style.left = `${ir.right - fr.left - 6}px`;
+    this.tools.style.top = `${ir.top - fr.top + 6}px`;
+  }
+
+  /** Mirror the image's src into the text input. An embedded data: URL
+   * (thousands of chars) is not meaningfully editable, so the field hides
+   * entirely; replace the image by deleting the figure. External URLs stay
+   * visible and editable. */
   private syncSrcInput() {
     const srcInput = this.controls.get("src") as HTMLInputElement;
     if (document.activeElement === srcInput) return;
     const raw = String(this.node.firstChild?.attrs.src ?? "");
     const embedded = raw.startsWith("data:");
+    srcInput.style.display = embedded ? "none" : "";
     const shown = embedded ? "" : raw;
     if (srcInput.value !== shown) srcInput.value = shown;
-    srcInput.placeholder = tr(embedded ? "hdocEmbeddedImage" : "insImage");
+  }
+
+  /** Attr-driven visual state: the width CSS variable, which chrome is
+   * available (picker only while empty, resize/align only with an image),
+   * and the active alignment button. */
+  private syncFigure() {
+    const has = !!String(this.node.firstChild?.attrs.src ?? "");
+    this.pickBtn.style.display = has ? "none" : "";
+    this.dom.classList.toggle("hd-fig-has-img", has);
+    const w = parseInt(String(this.node.attrs.width ?? ""), 10);
+    if (w >= FIG_MIN_PCT && w <= 100)
+      this.dom.style.setProperty("--hd-fig-w", `${w}%`);
+    else this.dom.style.removeProperty("--hd-fig-w");
+    const align = String(this.node.attrs.align ?? "");
+    for (const key of ["left", "center", "right"]) {
+      this.toolBtns
+        .get(key)
+        ?.classList.toggle("active", align === (key === "center" ? "" : key));
+    }
+    const reset = this.toolBtns.get("reset");
+    if (reset) reset.style.display = this.node.attrs.width ? "" : "none";
+  }
+
+  override stopEvent(e: Event): boolean {
+    // instanceof Element, not HTMLElement: clicks land on the toolbar's SVG icons
+    return (
+      (e.target instanceof Element &&
+        e.target.closest(".hd-fig-ui") !== null) ||
+      super.stopEvent(e)
+    );
   }
 
   override update(node: PMNode): boolean {
     if (!super.update(node)) return false;
     this.syncSrcInput();
+    this.syncFigure();
+    this.placeChrome();
     return true;
   }
 }
@@ -251,24 +405,29 @@ const isRelativeUrl = (u: string) =>
 class ImageView implements NodeView {
   dom: HTMLImageElement;
   private node: PMNode;
+  private readonly assetId: string;
 
   constructor(node: PMNode, assetId: string) {
     this.node = node;
+    this.assetId = assetId;
     this.dom = document.createElement("img");
-    this.render(assetId);
+    this.render();
   }
 
-  private render(assetId: string) {
+  private render() {
     const src = String(this.node.attrs.src ?? "");
-    this.dom.src = isRelativeUrl(src) ? relAssetUrl(assetId, src) : src;
+    const resolved = isRelativeUrl(src) ? relAssetUrl(this.assetId, src) : src;
+    // Compare via getAttribute — the .src getter absolutizes relative URLs.
+    if (this.dom.getAttribute("src") !== resolved) this.dom.src = resolved;
     this.dom.alt = String(this.node.attrs.alt ?? "");
     this.dom.classList.toggle("hd-img-empty", src === "");
   }
 
-  update(node: PMNode, _decos: unknown, view?: unknown): boolean {
-    void view;
+  update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
     this.node = node;
+    // Re-render: picking/pasting into an existing figure swaps the src.
+    this.render();
     return true;
   }
 }

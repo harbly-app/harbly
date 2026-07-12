@@ -340,22 +340,25 @@ h-step > :last-child {
   margin-bottom: 0;
 }
 
-/* ---------- h-figure ---------- */
+/* ---------- h-figure ----------
+   Images sit at natural size capped at the column (h-doc img has
+   max-width: 100%). width="60" = 60% of the column — a continuous value, so
+   it flows through the --hd-fig-w variable (set by runtime.js when rendering,
+   by the figure NodeView while editing). align swaps the text-align box. */
 h-figure {
   margin-bottom: 1.2em;
   text-align: center;
 }
-h-figure::after {
-  content: attr(caption);
-  display: block;
-  font-size: 0.85em;
-  color: var(--hd-sub);
-  margin-top: 0.5em;
+h-figure[align="left"] {
+  text-align: left;
 }
-h-figure:not([caption])::after,
-h-figure[caption=""]::after {
-  content: none;
-  margin: 0;
+h-figure[align="right"] {
+  text-align: right;
+}
+/* :not() spares ProseMirror's zero-width inline separator img, which the
+   editor inserts next to the real image and which must stay zero-width. */
+h-figure img:not(.ProseMirror-separator) {
+  width: var(--hd-fig-w, auto);
 }
 
 /* ---------- h-quote ---------- */

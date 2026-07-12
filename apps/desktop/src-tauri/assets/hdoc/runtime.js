@@ -35,6 +35,16 @@
     );
   }
 
+  // Figure sizing: width="60" → 60% of the text column, via the same CSS
+  // variable the editor's NodeView drives (see runtime.css h-figure img).
+  Array.prototype.forEach.call(
+    doc.querySelectorAll("h-figure[width]"),
+    function (fig) {
+      var w = parseInt(fig.getAttribute("width"), 10);
+      if (w >= 10 && w <= 100) fig.style.setProperty("--hd-fig-w", w + "%");
+    },
+  );
+
   // Heading anchors + table(s) of contents.
   var heads = Array.prototype.filter.call(
     doc.querySelectorAll("h1,h2,h3"),

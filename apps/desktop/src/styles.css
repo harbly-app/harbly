@@ -354,7 +354,6 @@ textarea,
 .hdoc-editor h-card::before,
 .hdoc-editor h-step::before,
 .hdoc-editor h-quote::after,
-.hdoc-editor h-figure::after,
 .hdoc-editor h-stat::before,
 .hdoc-editor h-stat::after {
   content: none;
@@ -448,10 +447,70 @@ h-figure .hd-fields {
   color: var(--hd-sub);
   text-align: center;
 }
-.hd-attr-caption {
-  font-size: 0.85em;
+/* Figure chrome: resize handles + alignment toolbar, hover-revealed and
+   JS-positioned against the image (it moves with alignment) */
+.hdoc-editor h-figure {
+  position: relative;
+}
+.hd-fig-ui {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+.hdoc-editor h-figure.hd-fig-has-img:hover .hd-fig-ui,
+.hdoc-editor h-figure.hd-resizing .hd-fig-ui {
+  opacity: 1;
+  pointer-events: auto;
+}
+.hd-fig-handle {
+  width: 14px;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hd-fig-handle::before {
+  content: "";
+  width: 5px;
+  height: 44px;
+  max-height: 60%;
+  border-radius: 3px;
+  background: var(--hd-accent);
+  box-shadow: 0 0 0 1.5px var(--hd-bg);
+}
+.hd-fig-tools {
+  transform: translateX(-100%);
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--hd-line);
+  border-radius: 8px;
+  background: var(--hd-bg);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
+}
+.hd-fig-tool {
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 3px;
+  border: none;
+  border-radius: 5px;
+  background: none;
   color: var(--hd-sub);
-  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.hd-fig-tool:hover {
+  background: var(--hd-soft);
+  color: var(--hd-k, inherit);
+}
+.hd-fig-tool.active {
+  color: var(--hd-accent);
+  background: var(--hd-accent-soft);
 }
 .hd-pick-img {
   align-self: center;

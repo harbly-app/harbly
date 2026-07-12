@@ -163,7 +163,10 @@ function block(node: PMNode, ind: string, out: string[]) {
           })
         : "";
       out.push(
-        `${ind}${openTag("h-figure", { caption: a.caption as string })}${imgTag}</h-figure>`,
+        `${ind}${openTag("h-figure", {
+          width: a.width as string,
+          align: a.align as string,
+        })}${imgTag}</h-figure>`,
       );
       break;
     }

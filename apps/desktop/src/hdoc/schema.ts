@@ -147,21 +147,27 @@ const nodes: Record<string, NodeSpec> = {
     ],
   },
 
+  /** width = percentage of the text column ("" = natural size, capped at
+   * 100% by the runtime CSS); align = "left" | "right" ("" = centered). */
   figure: {
     content: "image",
     group: "block inner",
-    attrs: { caption: { default: "" } },
+    attrs: { width: { default: "" }, align: { default: "" } },
     parseDOM: [
       {
         tag: "h-figure",
         getAttrs: (dom) => ({
-          caption: dom.getAttribute("caption") ?? "",
+          width: dom.getAttribute("width") ?? "",
+          align: dom.getAttribute("align") ?? "",
         }),
       },
     ],
     toDOM: (node) => [
       "h-figure",
-      attrsOut({ caption: node.attrs.caption as string }),
+      attrsOut({
+        width: node.attrs.width as string,
+        align: node.attrs.align as string,
+      }),
       0,
     ],
   },
