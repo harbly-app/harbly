@@ -2,7 +2,17 @@
 
 A local-first manager for single-file HTML — collect, preview, search, and iterate on your AI-generated artifacts (Claude / ChatGPT / Gemini).
 
-**Status: v0.1 (P0 local core, no AI features yet)** · macOS first · Tech stack in [TECH_STACK.md](TECH_STACK.md).
+**Status: v0.1 (P0 local core + AI workbench)** · macOS first · Tech stack in [TECH_STACK.md](TECH_STACK.md).
+
+## Download & install (macOS)
+
+**[Download Harbly 0.1.0 — Apple Silicon .dmg](https://github.com/harbly-app/harbly/raw/main/releases/Harbly_0.1.0_aarch64.dmg)** (~14 MB)
+
+1. Open the `.dmg` and drag **Harbly** into **Applications**.
+2. First launch: this build is not yet notarized by Apple, so macOS blocks it once. Go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** (on macOS 14 and older you can instead right-click the app → Open). Terminal alternative: `xattr -d com.apple.quarantine /Applications/Harbly.app`
+3. On first run Harbly creates its library at `~/Harbly` — a plain folder you own; your files stay there even if you uninstall.
+
+Requires an Apple Silicon Mac (Intel/universal builds are not shipped yet). AI features are optional and bring-your-own: connect a local [Claude Code](https://claude.com/claude-code) install (runs through MCP, no extra key), or add your own API key (Anthropic / OpenAI / OpenRouter) in Settings.
 
 ## What's in v0.1
 
@@ -16,6 +26,10 @@ A local-first manager for single-file HTML — collect, preview, search, and ite
 - **Universal undo/redo (⌘Z / ⌘⇧Z)**: delete, move, rename, duplicate, create, import, and paste are all undoable and redoable; the menu bar shows live labels like “Undo Delete ‘xx’”; deletes go through NSFileManager with the Trash landing spot recorded, so undo restores files to their exact original path — no confirmation dialogs needed, even for folders
 - **Finder tag interop**: tags are written to the file’s own xattr (`_kMDItemUserTags`), visible and searchable in Finder / Spotlight; tags added or removed in Finder sync back automatically; tags travel with files on copy, export, move, and backup — the database is only a query cache
 - **Six-language UI**: 简体中文 / 繁體中文 / English / 日本語 / 한국어 / Español — instant switching in Settings, localized native menu bar and dynamic “Undo xx” labels, system language detected on first launch
+- **AI workbench**: a conversational panel over your library — local agents (Claude Code / Codex CLI) or bring-your-own-key (Anthropic / OpenAI / OpenRouter); token-level streaming with live Markdown; every AI edit lands as a version of the file on disk
+- **Markdown alongside HTML**: manage `.md` files in the same library with a WYSIWYG editor (Milkdown), autosave + session checkpoints, protocol-level thumbnail rendering
+- **`.hdoc` page documents**: notes richer than Markdown — a fixed custom-element vocabulary rendered through the same sandboxed protocol, with a ProseMirror editor, three themes, and baked single-file export
+- **Favorites**: star assets from the grid, sidebar tree, or viewer; the flag lives in the file’s own xattr (`com.harbly.favorite`) so it travels with copies, moves, and backups
 
 > Version history is not user-facing yet (product decision, 2026-07): the UI has been fully removed, but the engine still keeps complete snapshots silently under `.harbly/versions/` (v1 on import + snapshots of external edits), so history reconnects whenever the feature returns. The `list_versions` / `restore_version` commands remain registered.
 
