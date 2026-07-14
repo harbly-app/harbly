@@ -117,14 +117,26 @@ function listItem(node: PMNode, ind: string, out: string[]) {
   out.push(`${ind}</li>`);
 }
 
+/** Span attributes on a table cell (from prosemirror-tables), emitted only when
+ * they deviate from the 1×1 default so plain cells stay noise-free. */
+function cellAttrs(node: PMNode): Record<string, string | undefined> {
+  const colspan = node.attrs.colspan as number;
+  const rowspan = node.attrs.rowspan as number;
+  return {
+    colspan: colspan > 1 ? String(colspan) : undefined,
+    rowspan: rowspan > 1 ? String(rowspan) : undefined,
+  };
+}
+
 function cell(node: PMNode, ind: string, out: string[]) {
   const tag = node.type.name === "table_header" ? "th" : "td";
+  const attrs = cellAttrs(node);
   const only = singleParagraph(node);
   if (only) {
-    out.push(`${ind}<${tag}>${inline(only)}</${tag}>`);
+    out.push(`${ind}${openTag(tag, attrs)}${inline(only)}</${tag}>`);
     return;
   }
-  wrap(out, ind, tag, undefined, node);
+  wrap(out, ind, tag, attrs, node);
 }
 
 function block(node: PMNode, ind: string, out: string[]) {

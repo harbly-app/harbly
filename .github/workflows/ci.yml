@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same ref supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    # macOS: the app links AppKit/WebKit (objc2, WKWebView snapshots) and is
+    # shipped Apple-Silicon-first, so the whole pipeline must run on macOS.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+
+      - run: pnpm install --frozen-lockfile
+
+      # tauri-build's externalBin contract refuses to compile harbly-app until
+      # the MCP sidecar is staged, so this must precede any cargo step that
+      # touches the desktop crate (clippy, test, build).
+      - name: Stage MCP sidecar
+        run: node apps/desktop/scripts/prepare-sidecar.mjs
+
+      - name: Lint (eslint + clippy)
+        run: pnpm lint
+      - name: Format check (prettier + rustfmt)
+        run: pnpm format:check
+
+      - name: Rust tests
+        run: cargo test --workspace
+      - name: Frontend tests
+        run: pnpm test:desktop
+
+      # Full bundle: regenerates the sidecar + third-party notices and produces
+      # the unsigned .app/.dmg, catching packaging breakage the checks above miss.
+      - name: Build desktop app
+        run: pnpm build:desktop

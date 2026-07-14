@@ -209,4 +209,48 @@ describe("hdoc round-trip", () => {
     expect(s).toContain("<th>a</th>");
     expect(s).toContain("<td>b</td>");
   });
+
+  it("round-trips merged table cells (colspan/rowspan)", () => {
+    const SPAN = `<h-doc v="1">
+  <table>
+    <tr>
+      <th colspan="2">合并表头</th>
+    </tr>
+    <tr>
+      <td rowspan="2">跨两行</td>
+      <td>右上</td>
+    </tr>
+    <tr>
+      <td>右下</td>
+    </tr>
+  </table>
+</h-doc>
+`;
+    const p1 = parseHdoc(SPAN);
+    expect(p1.ok).toBe(true);
+    if (!p1.ok) return;
+    const s1 = serializeHdoc(p1.doc);
+    // Spans survive the save instead of collapsing to plain cells…
+    expect(s1).toContain('<th colspan="2">合并表头</th>');
+    expect(s1).toContain('<td rowspan="2">跨两行</td>');
+    // …and the document is stable across a full round-trip.
+    const p2 = parseHdoc(s1);
+    expect(p2.ok).toBe(true);
+    if (!p2.ok) return;
+    expect(p2.doc.eq(p1.doc)).toBe(true);
+    expect(serializeHdoc(p2.doc)).toBe(s1);
+  });
+
+  it("rejects unknown attributes on known tags", () => {
+    // A stray attribute on an allowed element must flip to read-only, not be
+    // silently dropped on the next save.
+    expect(
+      parseHdoc(`<h-doc v="1"><p style="color:red">x</p></h-doc>`),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><p><a href="x" onclick="alert(1)">l</a></p></h-doc>`,
+      ),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+  });
 });

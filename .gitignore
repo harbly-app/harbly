@@ -15,3 +15,6 @@ docs/
 
 # staged sidecar binaries (built by apps/desktop/scripts/prepare-sidecar.mjs)
 apps/desktop/src-tauri/binaries/
+
+# generated third-party license notices (built by apps/desktop/scripts/generate-notices.mjs)
+apps/desktop/src-tauri/resources/

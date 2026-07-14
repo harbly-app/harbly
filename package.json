@@ -2,6 +2,7 @@
   "name": "harbly",
   "private": true,
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "dev:desktop": "pnpm --filter @harbly/desktop tauri dev",
     "build:desktop": "pnpm --filter @harbly/desktop tauri build",
@@ -9,6 +10,7 @@
     "build:landing": "pnpm --filter @harbly/landing build",
     "test:core": "cargo test -p harbly-core",
     "test:desktop": "pnpm --filter @harbly/desktop test",
+    "notices": "node apps/desktop/scripts/generate-notices.mjs",
     "format": "prettier --write --cache --ignore-path .prettierignore . && cargo fmt --all",
     "format:check": "prettier --check --cache --ignore-path .prettierignore . && cargo fmt --all --check",
     "lint": "eslint --cache --cache-location node_modules/.cache/eslint/ --max-warnings 0 . && cargo clippy --workspace --all-targets -- -D warnings",

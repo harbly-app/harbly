@@ -593,10 +593,18 @@ impl Library {
         } else {
             format!("{}/{}", cur.folder, name)
         };
-        if self.abs(&new_rel).exists() {
+        let src_abs = self.abs(&cur.rel_path);
+        let dst_abs = self.abs(&new_rel);
+        // A case-only rename ("a.html" → "A.html") reaches here on a
+        // case-insensitive volume (APFS/HFS+ default): the byte-exact guard above
+        // misses it, and the target "already exists" only because it IS the source
+        // file. Allow it through when source and target are the same file on disk;
+        // std::fs::rename then updates the stored case in place. A genuinely
+        // different file still collides.
+        if dst_abs.exists() && !same_file(&src_abs, &dst_abs) {
             return Err(HarblyError::msg("同名文件已存在"));
         }
-        std::fs::rename(self.abs(&cur.rel_path), self.abs(&new_rel))?;
+        std::fs::rename(&src_abs, &dst_abs)?;
         {
             let db = self.db.lock().unwrap();
             db.execute(
@@ -812,5 +820,60 @@ impl Library {
             "新建",
         )?;
         self.asset(&id)
+    }
+}
+
+/// Whether two paths point at the same file on disk — used to tell a case-only
+/// rename on a case-insensitive volume apart from a real name collision.
+#[cfg(unix)]
+fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+        _ => false,
+    }
+}
+
+#[cfg(not(unix))]
+fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn case_only_rename_is_allowed() {
+        // On a case-insensitive volume "Note.html" collides with "note.html"
+        // even though it is the same file; the rename must still go through.
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = crate::Library::open_or_create(tmp.path().join("L")).unwrap();
+        std::fs::write(lib.root().join("note.html"), "<title>n</title>").unwrap();
+        lib.scan(|_| {}).unwrap();
+        let a = lib
+            .list_assets("", crate::SortKey::Recent)
+            .unwrap()
+            .remove(0);
+        assert_eq!(a.file_name, "note.html");
+        let renamed = lib.rename_asset(&a.id, "Note").unwrap();
+        assert_eq!(renamed.file_name, "Note.html");
+    }
+
+    #[test]
+    fn rename_onto_a_different_existing_file_still_collides() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = crate::Library::open_or_create(tmp.path().join("L")).unwrap();
+        std::fs::write(lib.root().join("a.html"), "<title>a</title>").unwrap();
+        std::fs::write(lib.root().join("b.html"), "<title>b</title>").unwrap();
+        lib.scan(|_| {}).unwrap();
+        let a = lib
+            .list_assets("", crate::SortKey::Recent)
+            .unwrap()
+            .into_iter()
+            .find(|x| x.file_name == "a.html")
+            .unwrap();
+        assert!(lib.rename_asset(&a.id, "b").is_err());
     }
 }
