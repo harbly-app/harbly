@@ -46,19 +46,25 @@ pub(crate) fn extract_hdoc(content: &str) -> Extracted {
     Extracted { title, body }
 }
 
-fn walk(node: ego_tree::NodeRef<scraper::Node>, out: &mut String) {
-    if out.len() >= BODY_CAP {
-        return;
-    }
-    for child in node.children() {
-        match child.value() {
-            scraper::Node::Element(el) => {
-                // Scripts never execute in an hdoc (CSP), but their source text
-                // still must not pollute the index.
-                if matches!(el.name(), "script" | "style" | "noscript" | "template") {
-                    continue;
-                }
-                if el.name().starts_with("h-") {
+/// Collect indexable text: element text plus the user-visible attributes of
+/// h-* components. Iterative (an explicit pre/post traversal, not call-stack
+/// recursion) for the same reason as extract.rs walk — a deeply nested document
+/// must not overflow the stack and crash the scan, re-crashing on every rescan.
+fn walk(root: ego_tree::NodeRef<scraper::Node>, out: &mut String) {
+    let mut skip_depth = 0usize;
+    // Scripts never execute in an hdoc (CSP), but their source text still must
+    // not pollute the index.
+    let is_skipped = |el: &scraper::node::Element| {
+        matches!(el.name(), "script" | "style" | "noscript" | "template")
+    };
+    for edge in root.traverse() {
+        if out.len() >= BODY_CAP {
+            break;
+        }
+        match edge {
+            ego_tree::iter::Edge::Open(node) => match node.value() {
+                scraper::Node::Element(el) if is_skipped(el) => skip_depth += 1,
+                scraper::Node::Element(el) if skip_depth == 0 && el.name().starts_with("h-") => {
                     for a in TEXT_ATTRS {
                         if let Some(v) = el.attr(a) {
                             let v = v.trim();
@@ -69,16 +75,22 @@ fn walk(node: ego_tree::NodeRef<scraper::Node>, out: &mut String) {
                         }
                     }
                 }
-                walk(child, out);
-            }
-            scraper::Node::Text(t) => {
-                let tx = t.trim();
-                if !tx.is_empty() {
-                    out.push_str(tx);
-                    out.push(' ');
+                scraper::Node::Text(t) if skip_depth == 0 => {
+                    let tx = t.trim();
+                    if !tx.is_empty() {
+                        out.push_str(tx);
+                        out.push(' ');
+                    }
+                }
+                _ => {}
+            },
+            ego_tree::iter::Edge::Close(node) => {
+                if let scraper::Node::Element(el) = node.value() {
+                    if is_skipped(el) {
+                        skip_depth = skip_depth.saturating_sub(1);
+                    }
                 }
             }
-            _ => {}
         }
     }
 }
