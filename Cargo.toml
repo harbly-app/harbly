@@ -5,7 +5,7 @@ members = ["crates/harbly-ai", "crates/harbly-core", "crates/harbly-mcp", "apps/
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "AGPL-3.0"
+license = "AGPL-3.0-only"
 
 [profile.dev]
 incremental = true

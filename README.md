@@ -67,4 +67,4 @@ apps/landing/              landing site (Astro 5, static, zero client JS — not
 
 P0 local core (now) → P1 capture inlets (browser extension / MCP / inline text edits) → P2 cloud sharing → P3 team libraries → P4 AI workbench.
 
-License: AGPL-3.0
+License: [AGPL-3.0-only](LICENSE)

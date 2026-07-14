@@ -2,6 +2,7 @@
 name = "harbly-mcp"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 harbly-ai = { path = "../harbly-ai" }
