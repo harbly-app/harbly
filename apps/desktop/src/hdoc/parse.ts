@@ -8,7 +8,7 @@
  */
 import { DOMParser as PMDOMParser } from "prosemirror-model";
 import type { Node as PMNode } from "prosemirror-model";
-import { ALLOWED_TAGS, hdocSchema } from "./schema";
+import { ALLOWED_ATTRS, ALLOWED_TAGS, hdocSchema } from "./schema";
 
 export type ParsedHdoc =
   | { ok: true; doc: PMNode }
@@ -22,8 +22,17 @@ export function parseHdoc(text: string): ParsedHdoc {
   const bad = new Set<string>();
   const walker = dom.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
   for (let el = walker.nextNode(); el; el = walker.nextNode()) {
-    const tag = (el as Element).tagName.toLowerCase();
-    if (!ALLOWED_TAGS.has(tag)) bad.add(tag);
+    const element = el as Element;
+    const tag = element.tagName.toLowerCase();
+    if (!ALLOWED_TAGS.has(tag)) {
+      bad.add(tag);
+      continue;
+    }
+    const allowed = ALLOWED_ATTRS.get(tag);
+    for (const name of element.getAttributeNames()) {
+      const attr = name.toLowerCase();
+      if (!allowed?.has(attr)) bad.add(`${tag}[${attr}]`);
+    }
   }
   if (bad.size > 0) {
     return { ok: false, reason: "unsupported", tags: [...bad] };

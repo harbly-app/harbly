@@ -408,6 +408,9 @@ pub async fn export_hdoc_html(app: AppHandle, id: String) -> Result<Option<Strin
     let a = lib.asset(&id).map_err(|e| e.to_string())?;
     let src = lib.asset_abs_path(&id).map_err(|e| e.to_string())?;
     let text = std::fs::read_to_string(&src).map_err(|e| e.to_string())?;
+    // Baked exports carry no CSP, so refuse anything the editor wouldn't accept
+    // rather than emit a file where a stray <script> would run.
+    harbly_core::validate_hdoc_vocabulary(&text).map_err(|e| e.to_string())?;
     let lang = cur_lang(&app);
     let t = crate::i18n::l(&lang);
     let page = crate::hdoc_template::render_page(
@@ -881,6 +884,9 @@ pub async fn preview_hdoc(app: AppHandle, id: String) -> Result<(), String> {
     let lib = app.state::<AppState>().lib()?;
     let src = lib.asset_abs_path(&id).map_err(|e| e.to_string())?;
     let text = std::fs::read_to_string(&src).map_err(|e| e.to_string())?;
+    // The preview file is baked without a CSP (same as export), so hold it to
+    // the same vocabulary check before writing it out and opening it.
+    harbly_core::validate_hdoc_vocabulary(&text).map_err(|e| e.to_string())?;
     let lang = cur_lang(&app);
     let t = crate::i18n::l(&lang);
     let rel_base = src

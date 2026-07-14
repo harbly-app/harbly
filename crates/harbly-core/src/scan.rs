@@ -68,7 +68,10 @@ impl Library {
         }
         progress(ScanProgress { found, indexed });
 
-        // Clean up records whose files no longer exist on disk (deleted externally / moved out of the library)
+        // Clean up records whose files no longer exist on disk (deleted externally
+        // / moved out of the library). Version snapshots follow the file into the
+        // system Trash rather than being hard-deleted, so an external delete stays
+        // recoverable.
         let stale: Vec<String> = {
             let db = self.db.lock().unwrap();
             let mut stmt = db.prepare("SELECT id, rel_path FROM assets")?;
@@ -406,7 +409,13 @@ impl Library {
         Ok(())
     }
 
-    pub(crate) fn remove_asset_rows(&self, id: &str, delete_version_files: bool) -> Result<()> {
+    /// Clear an asset's index rows. `trash_version_files` decides the fate of its
+    /// version snapshots: callers that relocate the file themselves pass `false`
+    /// (forget keeps the history in place, trash_asset trashes it alongside the
+    /// file). The scanner's stale-record cleanup passes `true`, so a file deleted
+    /// in Finder sends its history to the system Trash too — recoverable, never
+    /// hard-deleted (the same call trash_asset makes for an in-app delete).
+    pub(crate) fn remove_asset_rows(&self, id: &str, trash_version_files: bool) -> Result<()> {
         {
             let db = self.db.lock().unwrap();
             db.execute("DELETE FROM assets WHERE id=?1", [id])?;
@@ -415,8 +424,11 @@ impl Library {
             db.execute("DELETE FROM asset_tags WHERE asset_id=?1", [id])?;
             db.execute("DELETE FROM ai_runs WHERE asset_id=?1", [id])?;
         }
-        if delete_version_files {
-            let _ = std::fs::remove_dir_all(self.versions_dir().join(id));
+        if trash_version_files {
+            let vdir = self.versions_dir().join(id);
+            if vdir.exists() {
+                let _ = trash::delete(&vdir);
+            }
         }
         Ok(())
     }
@@ -531,5 +543,35 @@ mod tests {
         assert_eq!(vs.len(), 1);
         // The real v1 (its file exists) survives the sweep
         assert!(lib.version_file_path(&a.id, 1).is_file());
+    }
+
+    #[test]
+    fn external_delete_cleans_index_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = crate::Library::open_or_create(tmp.path().join("L")).unwrap();
+        let file = lib.root().join("a.html");
+        std::fs::write(&file, "<html><title>A</title><body>x</body></html>").unwrap();
+        lib.scan(|_| {}).unwrap();
+        let a = lib
+            .list_assets("", crate::SortKey::Recent)
+            .unwrap()
+            .remove(0);
+        assert_eq!(lib.list_versions(&a.id).unwrap().len(), 1);
+
+        // Simulate an external (Finder) delete: the file vanishes from disk.
+        // Clear the versions dir up front so the rescan's cleanup takes its
+        // no-op branch instead of moving a folder into the real system Trash
+        // from a unit test (the recoverable-relocation path is shared verbatim
+        // with the exercised-in-practice trash_asset).
+        std::fs::remove_file(&file).unwrap();
+        std::fs::remove_dir_all(lib.versions_dir().join(&a.id)).unwrap();
+
+        let sum = lib.scan(|_| {}).unwrap();
+        assert_eq!(sum.removed, 1);
+        assert!(lib
+            .list_assets("", crate::SortKey::Recent)
+            .unwrap()
+            .is_empty());
+        assert!(lib.list_versions(&a.id).unwrap().is_empty());
     }
 }

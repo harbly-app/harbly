@@ -61,6 +61,9 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
     let crepe: Crepe | null = null;
     const ready = { v: false };
     const dirty = { v: false };
+    // Mirrors the `conflict` banner as a ref the save closures can read: while
+    // an external-edit conflict is unresolved, autosave must not write.
+    const conflicted = { v: false };
     const frontmatter = { v: "" };
     const lastSavedBody = { v: "" };
     const lastSavedHash = { v: asset.currentHash };
@@ -105,6 +108,10 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
 
     const doWrite = async (force: boolean) => {
       if (!crepe || !ready.v) return;
+      // An unresolved external-edit conflict freezes autosave: writing our copy
+      // now would overwrite the other edit before the user decides. Only the
+      // explicit "keep mine" path (force) is allowed through.
+      if (conflicted.v && !force) return;
       const body = crepe.getMarkdown();
       if (!force && body === lastSavedBody.v) {
         dirty.v = false;
@@ -165,6 +172,7 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
         useStore.getState().viewerAsset?.currentHash ?? lastSavedHash.v;
       sessionBaseHash.v = lastSavedHash.v; // the external edit is already its own version
       dirty.v = false;
+      conflicted.v = false;
       setConflict(false);
     };
 
@@ -176,6 +184,7 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
     actions.current = {
       reload: () => void reloadFromDisk(),
       keepMine: () => {
+        conflicted.v = false;
         setConflict(false);
         void save(true);
       },
@@ -188,8 +197,16 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
       const cur = s.viewerAsset;
       if (cur?.id !== id || !ready.v) return;
       if (cur.currentHash === lastSavedHash.v) return; // our echo
-      if (dirty.v) setConflict(true);
-      else void reloadFromDisk();
+      if (dirty.v) {
+        // Cancel the in-flight debounced autosave so it can't land on top of
+        // the external edit while the conflict banner is up.
+        if (saveTimer) {
+          clearTimeout(saveTimer);
+          saveTimer = null;
+        }
+        conflicted.v = true;
+        setConflict(true);
+      } else void reloadFromDisk();
     });
 
     const onVisibility = () => {

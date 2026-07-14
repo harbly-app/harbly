@@ -381,5 +381,27 @@ export const ALLOWED_TAGS = new Set([
   "td",
 ]);
 
+/** Per-tag attribute whitelist for v1. An allowed tag absent from this map
+ * permits no attributes; any attribute outside a tag's set switches the editor
+ * to the read-only preview, exactly as an unknown element does — a save must
+ * never be able to silently drop an attribute the editor didn't understand.
+ * (The h-doc root's attributes are validated separately, tolerating unknown
+ * theme/layout VALUES for forward compatibility.) */
+export const ALLOWED_ATTRS = new Map<string, ReadonlySet<string>>([
+  ["h-callout", new Set(["kind", "title"])],
+  ["h-card", new Set(["title"])],
+  ["h-step", new Set(["title"])],
+  ["h-figure", new Set(["width", "align"])],
+  ["h-quote", new Set(["cite"])],
+  ["h-stat", new Set(["value", "label"])],
+  ["h-details", new Set(["summary", "open"])],
+  ["img", new Set(["src", "alt"])],
+  ["a", new Set(["href"])],
+  // Merged table cells (prosemirror-tables). colwidth stays out of v1: column
+  // resizing is not enabled, so cells never carry it.
+  ["th", new Set(["colspan", "rowspan"])],
+  ["td", new Set(["colspan", "rowspan"])],
+]);
+
 export const THEMES = ["paper", "sepia", "night"] as const;
 export type HdocTheme = (typeof THEMES)[number];

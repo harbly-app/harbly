@@ -15,7 +15,7 @@ pub use ai_meta::{
     AI_VERSION_LABEL,
 };
 pub use error::{HarblyError, Result};
-pub use hdoc::{HDOC_NEW_TEMPLATE, HDOC_VOCAB_VERSION};
+pub use hdoc::{validate_hdoc_vocabulary, HDOC_NEW_TEMPLATE, HDOC_VOCAB_VERSION};
 pub use markdown::md_to_html_body;
 pub use ops::copy_dir_recursive;
 pub use tags_xattr::{
