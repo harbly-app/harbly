@@ -241,25 +241,50 @@ pub async fn run_turn(
     }
 }
 
-/// The shared system prompt: same identity and rules for every supply, tool
-/// names matching the shared tool surface.
+/// System prompt for supplies that expose the shared library tool surface
+/// (Claude via MCP, BYOK): identity + tool names + tool-use rules + context.
 pub(crate) fn system_prompt(task: &SessionTask) -> String {
-    let mut s = format!(
+    build_system_prompt(task, true)
+}
+
+/// System prompt for supplies with NO library tools (the Codex CLI works on a
+/// scratch copy): the same identity and context, but without advertising tools
+/// it cannot call. The caller supplies its own file-handling instructions.
+pub(crate) fn system_prompt_core(task: &SessionTask) -> String {
+    build_system_prompt(task, false)
+}
+
+fn build_system_prompt(task: &SessionTask, tools: bool) -> String {
+    let mut s = String::from(
         "You are the AI workbench of Harbly, a local-first manager for single-file HTML and \
-         Markdown assets. You operate on the user's library exclusively through tools: \
-         search_library (full text), list_assets (enumeration with sizes), read_asset, \
-         write_asset, create_asset, delete_asset.\n\
-         Rules:\n\
-         - Read an asset before modifying it. write_asset must carry the COMPLETE new file \
-           content; every write becomes a new version the user can inspect and roll back.\n\
-         - Write or delete only when the user asks for it; questions and reviews get prose \
-           answers. Deletions go to the system Trash (user-recoverable).\n\
-         - Keep files self-contained; do not introduce external network resources unless asked.\n\
-         - Never invent asset ids — obtain them from search_library/list_assets or the context \
-           below.\n\
-         - Respond in {lang}.",
-        lang = task.reply_lang,
+         Markdown assets.",
     );
+    if tools {
+        s.push_str(
+            " You operate on the user's library exclusively through tools: search_library \
+             (full text), list_assets (enumeration with sizes), read_asset, write_asset, \
+             create_asset, delete_asset.",
+        );
+    }
+    s.push_str("\nRules:\n");
+    if tools {
+        s.push_str(
+            "- Read an asset before modifying it. write_asset must carry the COMPLETE new file \
+             content; every write becomes a new version the user can inspect and roll back.\n\
+             - Write or delete only when the user asks for it; questions and reviews get prose \
+             answers. Deletions go to the system Trash (user-recoverable).\n",
+        );
+    }
+    s.push_str(
+        "- Keep files self-contained; do not introduce external network resources unless asked.\n",
+    );
+    if tools {
+        s.push_str(
+            "- Never invent asset ids — obtain them from search_library/list_assets or the \
+             context below.\n",
+        );
+    }
+    s.push_str(&format!("- Respond in {}.", task.reply_lang));
     if let Some(a) = &task.current_asset {
         s.push_str(&format!(
             "\nContext: the user is currently viewing \"{}\" (title: {}, asset_id: {}). \
@@ -324,6 +349,25 @@ mod tests {
         let mut bare = t.clone();
         bare.current_asset = None;
         assert!(!system_prompt(&bare).contains("currently viewing"));
+    }
+
+    #[test]
+    fn core_prompt_omits_tools_but_keeps_context() {
+        let s = system_prompt_core(&task());
+        // Codex has no library tools, so none may be advertised…
+        for tool in [
+            "search_library",
+            "read_asset",
+            "write_asset",
+            "create_asset",
+            "delete_asset",
+        ] {
+            assert!(!s.contains(tool), "core prompt leaked tool: {tool}");
+        }
+        // …but identity, language, and current-asset context still apply.
+        assert!(s.contains("Harbly"));
+        assert!(s.contains("zh-CN"));
+        assert!(s.contains("asset_id: a1"));
     }
 
     #[test]

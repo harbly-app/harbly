@@ -12,8 +12,8 @@
 
 use crate::tools::call_label;
 use crate::{
-    history_block, system_prompt, AgentKind, AiError, AiEvent, CancelFlag, EventSink, SessionTask,
-    Supply, ToolExecutor, TurnOutput,
+    history_block, system_prompt, system_prompt_core, AgentKind, AiError, AiEvent, CancelFlag,
+    EventSink, SessionTask, Supply, ToolExecutor, TurnOutput,
 };
 use serde_json::Value;
 use std::io::Write as _;
@@ -27,6 +27,10 @@ const AGENT_TIMEOUT: Duration = Duration::from_secs(900);
 /// Poll interval while waiting for output — lets cancellation land quickly
 /// even when the agent is silent.
 const POLL: Duration = Duration::from_millis(400);
+/// Grace period after the agent closes its output stream: a well-behaved CLI
+/// exits at once, so a process still alive past this has wedged and gets killed
+/// (its stream is already complete, so the parsed reply is kept).
+const EXIT_GRACE: Duration = Duration::from_secs(5);
 /// Cap on replayed conversation context for fresh (non-resumed) agent runs.
 const HISTORY_CHARS: usize = 6_000;
 
@@ -263,7 +267,9 @@ pub(crate) async fn run_codex_turn(
         file_ctx = Some((a.id.clone(), path, content));
     }
 
-    let mut prompt = system_prompt(task);
+    // Core prompt only: codex has no library tools (it edits the scratch copy
+    // staged below), so it must not be told about tools it cannot call.
+    let mut prompt = system_prompt_core(task);
     prompt.push_str("\n\n");
     prompt.push_str(&history_block(&task.history, HISTORY_CHARS));
     if let Some(a) = &task.current_asset {
@@ -348,6 +354,10 @@ async fn run_agent_process(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // Own process group so a teardown reaches every subprocess the CLI spawned,
+    // not just the CLI itself (agent CLIs routinely fork helpers).
+    #[cfg(unix)]
+    cmd.process_group(0);
     let mut child = cmd
         .spawn()
         .map_err(|e| AiError::Agent(format!("spawn failed: {e}")))?;
@@ -379,17 +389,17 @@ async fn run_agent_process(
     let mut parser = StreamParser::new(kind);
     loop {
         if cancel.is_cancelled() {
-            let _ = child.start_kill();
+            kill_group(&mut child);
             return Err(AiError::Cancelled);
         }
         if started.elapsed() > AGENT_TIMEOUT {
-            let _ = child.start_kill();
+            kill_group(&mut child);
             return Err(AiError::Timeout);
         }
         match tokio::time::timeout(POLL, lines.next_line()).await {
             Err(_) => continue,
             Ok(Err(e)) => {
-                let _ = child.start_kill();
+                kill_group(&mut child);
                 return Err(AiError::Agent(e.to_string()));
             }
             Ok(Ok(None)) => break,
@@ -398,25 +408,48 @@ async fn run_agent_process(
                     on_event(ev);
                 }
                 if let Some(err) = parser.error.take() {
-                    let _ = child.start_kill();
+                    kill_group(&mut child);
                     return Err(AiError::Agent(err));
                 }
             }
         }
     }
 
-    let status = child
-        .wait()
-        .await
-        .map_err(|e| AiError::Agent(e.to_string()))?;
-    if !status.success() {
-        let tail = stderr_tail.lock().unwrap().clone();
-        let tail = tail.trim();
-        return Err(AiError::Agent(if tail.is_empty() {
-            format!("exit code {}", status.code().unwrap_or(-1))
-        } else {
-            tail.chars().take(300).collect()
-        }));
+    // stdout hit EOF, so the stream is complete and the reply is already parsed.
+    // Bound the wait for the process to actually exit: a CLI that closed its
+    // pipe but never exits (or a lingering grandchild) must not wedge the
+    // session "busy" forever, and cancellation must still land here.
+    let grace = Instant::now() + EXIT_GRACE;
+    let status = loop {
+        if cancel.is_cancelled() {
+            kill_group(&mut child);
+            return Err(AiError::Cancelled);
+        }
+        match tokio::time::timeout(POLL, child.wait()).await {
+            Ok(Ok(status)) => break Some(status),
+            Ok(Err(e)) => {
+                kill_group(&mut child);
+                return Err(AiError::Agent(e.to_string()));
+            }
+            // Still alive after the grace window: tear it (and any subprocess)
+            // down and keep the reply the completed stream already yielded.
+            Err(_) if Instant::now() >= grace => {
+                kill_group(&mut child);
+                break None;
+            }
+            Err(_) => {}
+        }
+    };
+    if let Some(status) = status {
+        if !status.success() {
+            let tail = stderr_tail.lock().unwrap().clone();
+            let tail = tail.trim();
+            return Err(AiError::Agent(if tail.is_empty() {
+                format!("exit code {}", status.code().unwrap_or(-1))
+            } else {
+                tail.chars().take(300).collect()
+            }));
+        }
     }
 
     Ok(ParsedRun {
@@ -424,6 +457,21 @@ async fn run_agent_process(
         final_text: parser.final_text,
         session_id: parser.session_id,
     })
+}
+
+/// Kill the agent and every subprocess it spawned. The child leads its own
+/// process group (see `process_group(0)` at spawn), so signalling the negated
+/// pid reaches the whole tree; `start_kill` then lets tokio reap the direct
+/// child. On non-unix, only the direct child can be killed.
+fn kill_group(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    if let Some(pid) = child.id() {
+        // SAFETY: a bare kill(2); an already-reaped pid just yields ESRCH.
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGKILL);
+        }
+    }
+    let _ = child.start_kill();
 }
 
 /// Tolerant JSONL reader for both CLIs (and both generations of the codex
@@ -904,6 +952,31 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, AiError::Cancelled));
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn hang_after_output_is_killed_and_reply_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        // Stub: report completion, close stdout, then linger far past the grace
+        // window. The post-EOF wait must not block on the lingering process —
+        // the reply is already in hand — so the turn returns promptly.
+        let (_bin, supply) = stub_supply(
+            dir.path(),
+            "#!/bin/sh\necho '{\"msg\":{\"type\":\"task_complete\",\"last_agent_message\":\"改好了\"}}'\nexec 1>&-\nsleep 60\n",
+        );
+        let exec = StubExec {
+            content: String::new(),
+            writes: std::sync::Mutex::new(vec![]),
+        };
+        let mut bare = task();
+        bare.current_asset = None;
+        let started = Instant::now();
+        let out = run_codex_turn(&bare, &supply, &exec, CancelFlag::new(), &mut |_| {})
+            .await
+            .unwrap();
+        assert_eq!(out.reply, "改好了");
+        // Killed after the grace window, nowhere near the stub's 60s sleep.
+        assert!(started.elapsed() < Duration::from_secs(20));
     }
 
     #[tokio::test]

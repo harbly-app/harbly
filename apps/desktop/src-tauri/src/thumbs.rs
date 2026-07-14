@@ -15,11 +15,17 @@ pub fn spawn_worker(app: AppHandle) -> Sender<ThumbJob> {
 }
 
 fn worker_loop(app: AppHandle, rx: Receiver<ThumbJob>) {
+    // Content hashes whose render failed this session. A hidden-WebView snapshot
+    // is expensive, and without this a failure is retried on every enqueue
+    // (scroll/scan) forever. Kept in memory, not on disk, so a relaunch retries:
+    // transient failures (WebView busy, app quit mid-render) self-heal, while a
+    // genuinely unrenderable file stops churning for the rest of the session.
+    let mut failed: std::collections::HashSet<String> = std::collections::HashSet::new();
     while let Ok(job) = rx.recv() {
         let state = app.state::<crate::state::AppState>();
         let Ok(lib) = state.lib() else { continue };
         let dest = lib.thumb_path(&job.hash);
-        if dest.exists() {
+        if dest.exists() || failed.contains(&job.hash) {
             continue;
         }
         match render_thumb(&app, &job.url) {
@@ -29,8 +35,9 @@ fn worker_loop(app: AppHandle, rx: Receiver<ThumbJob>) {
                 }
             }
             None => {
-                // Render failure/timeout: write a placeholder marker file to avoid
-                // endless retries; the frontend shows a code icon instead
+                // Render failure/timeout: remember it so we don't re-render this
+                // content again this session; the card falls back to a code icon.
+                failed.insert(job.hash.clone());
                 let _ = app.emit("thumb-failed", &job);
             }
         }
