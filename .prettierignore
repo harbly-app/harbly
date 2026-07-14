@@ -9,6 +9,9 @@ target/
 # Generated code
 apps/desktop/src-tauri/gen/
 
+# Generated third-party notices (built by apps/desktop/scripts/generate-notices.mjs)
+apps/desktop/src-tauri/resources/
+
 # Caches
 .vite/
 .astro/
