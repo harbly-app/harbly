@@ -7,9 +7,6 @@ target/
 .astro/
 .claude/
 
-# not published yet: commit the landing page at launch (remove this line then)
-apps/landing/
-
 # internal design docs, never published
 docs/
 
