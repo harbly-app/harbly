@@ -117,7 +117,12 @@ pub fn activate_library(app: &AppHandle, root: PathBuf) -> Result<String, String
         *state.watcher.lock().unwrap() = Some(watcher);
     }
 
-    // Invalidate the old library's undo log (its paths no longer belong to the current library)
+    // Invalidate the old library's undo log (its paths no longer belong to the
+    // current library). The generation bump makes any in-flight undo execution
+    // drop its inverse entry instead of pushing it onto the new library's stack.
+    state
+        .lib_generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     state.undo_stack.lock().unwrap().clear();
     state.redo_stack.lock().unwrap().clear();
     // Same for the AI-session undo slot: restoring it would write the OLD
@@ -338,6 +343,23 @@ pub async fn asset_checkpoint(
     Ok(created.is_some())
 }
 
+/// Rescue path for edits orphaned by an unresolved external-edit conflict at
+/// editor close: snapshot the local buffer as a version, never the live file
+/// (the user hasn't chosen a side of the conflict).
+#[tauri::command]
+pub async fn asset_snapshot_text(
+    app: AppHandle,
+    id: String,
+    content: String,
+) -> Result<(), String> {
+    let lib = app.state::<AppState>().lib()?;
+    tauri::async_runtime::spawn_blocking(move || lib.snapshot_text_version(&id, &content, "编辑"))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Create a new empty Markdown file and open it (undoable, like New Folder)
 #[tauri::command]
 pub async fn asset_new_markdown(
@@ -555,20 +577,31 @@ pub async fn asset_rename(
 pub async fn assets_move(app: AppHandle, ids: Vec<String>, dest: String) -> Result<usize, String> {
     let lib = app.state::<AppState>().lib()?;
     let app2 = app.clone();
-    let n = tauri::async_runtime::spawn_blocking(move || -> Result<usize, String> {
+    let res = tauri::async_runtime::spawn_blocking(move || -> Result<usize, String> {
         let mut moves: Vec<(PathBuf, PathBuf)> = vec![];
         let mut first_name = String::new();
+        // A mid-batch failure aborts the loop but must NOT abort recording:
+        // the items already moved are real, and without an undo entry ⌘Z
+        // could never bring them back.
+        let mut failed: Option<String> = None;
         for id in &ids {
             let Ok(cur) = lib.asset(id) else { continue };
             if cur.folder == dest {
                 continue;
             }
             let old_abs = lib.abs(&cur.rel_path);
-            let r = lib.move_asset(id, &dest).map_err(|e| e.to_string())?;
-            if first_name.is_empty() {
-                first_name = cur.file_name;
+            match lib.move_asset(id, &dest) {
+                Ok(r) => {
+                    if first_name.is_empty() {
+                        first_name = cur.file_name;
+                    }
+                    moves.push((old_abs, lib.abs(&r.rel_path)));
+                }
+                Err(e) => {
+                    failed = Some(e.to_string());
+                    break;
+                }
             }
-            moves.push((old_abs, lib.abs(&r.rel_path)));
         }
         let n = moves.len();
         if n > 0 {
@@ -580,12 +613,16 @@ pub async fn assets_move(app: AppHandle, ids: Vec<String>, dest: String) -> Resu
             };
             record_op(&app2, FileOp::Moved { moves }, label);
         }
-        Ok(n)
+        match failed {
+            Some(e) => Err(e),
+            None => Ok(n),
+        }
     })
     .await
-    .map_err(|e| e.to_string())??;
+    .map_err(|e| e.to_string())?;
+    // Emit even on partial failure — some files DID move and every view must reflect that
     let _ = app.emit("library-changed", ());
-    Ok(n)
+    res
 }
 
 // ---------- File-operation log: generic undo/redo with Finder semantics ----------
@@ -684,12 +721,34 @@ fn move_back(lib: &Library, from: &Path, to: &Path) -> Option<PathBuf> {
 fn execute_entry(lib: &Library, entry: OpEntry) -> (Option<OpEntry>, usize) {
     let label = entry.label;
     match entry.op {
-        FileOp::Trashed { moves } => {
+        FileOp::Trashed { moves, assets } => {
             let mut created = vec![];
+            // (original path, actual landing) — a restore dodges to a suffixed
+            // name when the original path got reoccupied
+            let mut restored: Vec<(PathBuf, PathBuf)> = vec![];
             for (landing, orig) in &moves {
                 if let Some(d) = move_back(lib, landing, orig) {
+                    restored.push((orig.clone(), d.clone()));
                     created.push(d);
                 }
+            }
+            // Reconnect the original asset ids BEFORE the caller's scan runs —
+            // otherwise the scan registers the restored files as brand-new
+            // assets and the preserved version/AI history stays orphaned.
+            for meta in &assets {
+                let orig_abs = lib.abs(&meta.rel_path);
+                let Some((_, dest)) = restored.iter().find(|(orig, _)| *orig == orig_abs) else {
+                    continue;
+                };
+                let Some(rel) = dest
+                    .strip_prefix(lib.root())
+                    .ok()
+                    .and_then(|r| r.to_str())
+                    .map(|r| r.replace('\\', "/"))
+                else {
+                    continue;
+                };
+                let _ = lib.resurrect_asset(meta, &rel);
             }
             let n = created.len();
             (
@@ -719,18 +778,42 @@ fn execute_entry(lib: &Library, entry: OpEntry) -> (Option<OpEntry>, usize) {
         }
         FileOp::Created { paths } => {
             let mut trashed = vec![];
+            let mut assets = vec![];
+            let mut n = 0usize;
             for p in &paths {
                 if !p.exists() {
                     continue;
                 }
+                // Registered file? Snapshot its row and take its versions along,
+                // exactly like a direct delete — so the redo→undo loop stays
+                // closed with the id and history intact. (Folders and files in
+                // unregistered states just take the plain-trash path.)
+                let meta = p
+                    .strip_prefix(lib.root())
+                    .ok()
+                    .and_then(|r| r.to_str())
+                    .and_then(|r| lib.asset_by_rel(&r.replace('\\', "/")).ok());
                 if let Ok(landing) = crate::trash_util::trash_with_result(p) {
+                    n += 1;
+                    if let Some(m) = meta {
+                        let vdir = lib.versions_dir().join(&m.id);
+                        if vdir.exists() {
+                            if let Ok(vt) = crate::trash_util::trash_with_result(&vdir) {
+                                trashed.push((vt, vdir));
+                            }
+                        }
+                        let _ = lib.forget_asset(&m.id);
+                        assets.push(m);
+                    }
                     trashed.push((landing, p.clone()));
                 }
             }
-            let n = trashed.len();
             (
                 (n > 0).then_some(OpEntry {
-                    op: FileOp::Trashed { moves: trashed },
+                    op: FileOp::Trashed {
+                        moves: trashed,
+                        assets,
+                    },
                     label,
                 }),
                 n,
@@ -747,8 +830,17 @@ pub struct UndoResult {
 }
 
 async fn shift_stack(app: AppHandle, redo: bool) -> Result<Option<UndoResult>, String> {
+    // Serialize the WHOLE execution, not just the pop: executing an entry spans
+    // file moves plus a full scan (seconds on a big library), and a second ⌘Z
+    // arriving meanwhile would run a second inverse concurrently over paths the
+    // first is still touching (undoing an import while the folder that received
+    // it is itself being un-created, etc.).
+    let state = app.state::<AppState>();
+    let _exec = state.undo_exec.lock().await;
+    let generation = state
+        .lib_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
     let entry = {
-        let state = app.state::<AppState>();
         let popped = if redo {
             state.redo_stack.lock().unwrap().pop()
         } else {
@@ -758,7 +850,7 @@ async fn shift_stack(app: AppHandle, redo: bool) -> Result<Option<UndoResult>, S
     };
     let Some(entry) = entry else { return Ok(None) };
     let label = entry.label.clone();
-    let lib = app.state::<AppState>().lib()?;
+    let lib = state.lib()?;
     let (inverse, n) = tauri::async_runtime::spawn_blocking(move || {
         let r = execute_entry(&lib, entry);
         let _ = lib.scan(|_| {});
@@ -766,14 +858,22 @@ async fn shift_stack(app: AppHandle, redo: bool) -> Result<Option<UndoResult>, S
     })
     .await
     .map_err(|e| e.to_string())?;
-    if let Some(inv) = inverse {
-        let state = app.state::<AppState>();
-        let target = if redo {
-            &state.undo_stack
-        } else {
-            &state.redo_stack
-        };
-        target.lock().unwrap().push(inv);
+    // Library switched while we were executing: the inverse entry carries the
+    // OLD library's absolute paths — pushing it now would let a later ⌘Z run
+    // file operations against the wrong library. Drop it instead.
+    let switched = state
+        .lib_generation
+        .load(std::sync::atomic::Ordering::SeqCst)
+        != generation;
+    if !switched {
+        if let Some(inv) = inverse {
+            let target = if redo {
+                &state.undo_stack
+            } else {
+                &state.redo_stack
+            };
+            target.lock().unwrap().push(inv);
+        }
     }
     sync_undo_menu(&app);
     enqueue_missing_thumbs(&app);
@@ -809,8 +909,13 @@ pub async fn assets_trash(app: AppHandle, ids: Vec<String>) -> Result<TrashResul
     let app2 = app.clone();
     let res = tauri::async_runtime::spawn_blocking(move || -> Result<TrashResult, String> {
         let mut moves: Vec<(PathBuf, PathBuf)> = vec![];
+        let mut assets: Vec<harbly_core::AssetMeta> = vec![];
         let mut names: Vec<String> = vec![];
         let mut count = 0usize;
+        // A mid-batch failure aborts the loop but must NOT abort recording:
+        // the items already in the Trash are real, and without an undo entry
+        // ⌘Z could never bring them back.
+        let mut failed: Option<String> = None;
         for id in &ids {
             let Ok(a) = lib.asset(id) else { continue };
             let abs = lib.abs(&a.rel_path);
@@ -826,12 +931,16 @@ pub async fn assets_trash(app: AppHandle, ids: Vec<String>) -> Result<TrashResul
                         }
                     }
                     let _ = lib.forget_asset(id);
-                    names.push(a.file_name);
+                    names.push(a.file_name.clone());
+                    assets.push(a);
                     count += 1;
                 }
                 Err(_) => {
                     // Platform fallback: regular, non-undoable deletion
-                    lib.trash_asset(id).map_err(|e| e.to_string())?;
+                    if let Err(e) = lib.trash_asset(id) {
+                        failed = Some(e.to_string());
+                        break;
+                    }
                     count += 1;
                 }
             }
@@ -844,14 +953,18 @@ pub async fn assets_trash(app: AppHandle, ids: Vec<String>) -> Result<TrashResul
             } else {
                 crate::i18n::tpl(t.op_delete_n, &names.len().to_string())
             };
-            record_op(&app2, FileOp::Trashed { moves }, label);
+            record_op(&app2, FileOp::Trashed { moves, assets }, label);
         }
-        Ok(TrashResult { count, undoable })
+        match failed {
+            Some(e) => Err(e),
+            None => Ok(TrashResult { count, undoable }),
+        }
     })
     .await
-    .map_err(|e| e.to_string())??;
+    .map_err(|e| e.to_string())?;
+    // Emit even on partial failure — some files DID get trashed
     let _ = app.emit("library-changed", ());
-    Ok(res)
+    res
 }
 
 #[tauri::command]
@@ -991,6 +1104,10 @@ pub async fn folder_delete(app: AppHandle, rel: String) -> Result<bool, String> 
                     &app2,
                     FileOp::Trashed {
                         moves: vec![(trashed, abs)],
+                        // Folder-level trash: contained assets are cleaned up by
+                        // the scan above; per-id resurrection on undo is not
+                        // attempted (the rescan re-registers the files).
+                        assets: vec![],
                     },
                     crate::i18n::tpl(t.op_delete_folder, &name),
                 );

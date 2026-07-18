@@ -36,6 +36,9 @@ export const api = {
     invoke<AssetMeta>("asset_write", { id, content }),
   assetCheckpoint: (id: string, baseHash: string) =>
     invoke<boolean>("asset_checkpoint", { id, baseHash }),
+  /** Version-snapshot text WITHOUT writing the live file (conflict rescue). */
+  assetSnapshotText: (id: string, content: string) =>
+    invoke<null>("asset_snapshot_text", { id, content }),
   newMarkdown: (folder: string, name?: string) =>
     invoke<AssetMeta>("asset_new_markdown", { folder, name: name ?? null }),
   newHdoc: (folder: string, name?: string) =>

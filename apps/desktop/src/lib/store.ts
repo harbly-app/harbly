@@ -11,7 +11,14 @@ import type {
   TagInfo,
   TreeNode,
 } from "./types";
-import { FAVORITES, INBOX } from "./types";
+import {
+  creationDest,
+  FAVORITES,
+  INBOX,
+  isTagView,
+  tagOfView,
+  tagView,
+} from "./types";
 
 export type Modal =
   | { kind: "move"; ids: string[]; label: string; fromFolder: string | null }
@@ -60,7 +67,7 @@ interface S {
   inbox: number;
   favCount: number;
   tags: TagInfo[];
-  /** Current view: "" = all assets · "_inbox" = inbox · "::favorites" = starred · "#xx" = tag view · anything else = folder relative path */
+  /** Current view: "" = all assets · "_inbox" = inbox · FAVORITES = starred · TAG_PREFIX+name = tag view · anything else = folder relative path (sentinels start with "/", which no real rel can) */
   folder: string;
   sort: SortKey;
   assets: AssetMeta[];
@@ -149,17 +156,13 @@ interface S {
   setDragOver: (b: boolean) => void;
 }
 
-function isTagView(folder: string) {
-  return folder.startsWith("#");
-}
-
 function viewExists(
   tree: TreeNode | null,
   tags: TagInfo[],
   folder: string,
 ): boolean {
   if (folder === "" || folder === INBOX || folder === FAVORITES) return true;
-  if (isTagView(folder)) return tags.some((t) => `#${t.name}` === folder);
+  if (isTagView(folder)) return tags.some((t) => tagView(t.name) === folder);
   if (!tree) return false;
   const walk = (n: TreeNode): boolean =>
     n.rel === folder || n.children.some(walk);
@@ -169,7 +172,7 @@ function viewExists(
 function fetchAssets(folder: string, sort: SortKey): Promise<AssetMeta[]> {
   if (folder === FAVORITES) return api.favoriteAssets();
   return isTagView(folder)
-    ? api.assetsByTag(folder.slice(1))
+    ? api.assetsByTag(tagOfView(folder))
     : api.listAssets(folder, sort);
 }
 
@@ -316,6 +319,16 @@ export const useStore = create<S>((set, get) => ({
     ]);
     const f = viewExists(tree, tags, folder) ? folder : "";
     const assets = await fetchAssets(f, sort);
+    // The user may have navigated or re-sorted while we awaited: committing
+    // the captured view now would yank it back (and the navigation's own
+    // guarded fetch would then discard its result — the user ends up
+    // stranded). Metadata is view-independent and always safe to adopt; the
+    // asset list is committed only if the folder AND sort it was fetched for
+    // are still current.
+    if (get().folder !== folder || get().sort !== sort) {
+      set({ tree, inbox, favCount, tags });
+      return;
+    }
     // Drop assets that no longer exist from the selection
     const alive = new Set(assets.map((a) => a.id));
     set((s) => ({
@@ -342,6 +355,7 @@ export const useStore = create<S>((set, get) => ({
   },
 
   setFolder: (rel) => {
+    const sort = get().sort;
     set({
       folder: rel,
       selIds: [],
@@ -350,9 +364,12 @@ export const useStore = create<S>((set, get) => ({
       editingFolder: null,
       folderArmed: false,
     });
-    fetchAssets(rel, get().sort)
+    fetchAssets(rel, sort)
       .then((assets) => {
-        if (get().folder === rel) {
+        // Commit only if BOTH the view and the sort are still what this
+        // request was issued for — a stale response must never clobber the
+        // list a later navigation/sort change already owns.
+        if (get().folder === rel && get().sort === sort) {
           set({ assets });
           api.requestThumbs(assets.map((a) => a.id)).catch(() => {});
         }
@@ -368,9 +385,14 @@ export const useStore = create<S>((set, get) => ({
   },
 
   setSort: (sort) => {
+    const folder = get().folder;
     set({ sort });
-    fetchAssets(get().folder, sort)
-      .then((assets) => set({ assets }))
+    fetchAssets(folder, sort)
+      .then((assets) => {
+        // Same latest-wins rule as setFolder: a stale response for an old
+        // folder/sort must not overwrite the current view's list.
+        if (get().folder === folder && get().sort === sort) set({ assets });
+      })
       .catch(() => {});
   },
 
@@ -401,14 +423,7 @@ export const useStore = create<S>((set, get) => ({
   // current folder — tag/inbox views fall back to the library root, mirroring the
   // New Folder rule. It then opens straight in the editor.
   newMarkdown: async (folder) => {
-    const st = get();
-    const dest =
-      folder ??
-      (st.folder.startsWith("#") ||
-      st.folder === INBOX ||
-      st.folder === FAVORITES
-        ? ""
-        : st.folder);
+    const dest = folder ?? creationDest(get().folder);
     try {
       const a = await api.newMarkdown(dest);
       get().setFolder(a.folder);
@@ -420,14 +435,7 @@ export const useStore = create<S>((set, get) => ({
 
   // New page (.hdoc): same destination rule as New Markdown, opens in the editor
   newHdoc: async (folder) => {
-    const st = get();
-    const dest =
-      folder ??
-      (st.folder.startsWith("#") ||
-      st.folder === INBOX ||
-      st.folder === FAVORITES
-        ? ""
-        : st.folder);
+    const dest = folder ?? creationDest(get().folder);
     try {
       const a = await api.newHdoc(dest);
       get().setFolder(a.folder);

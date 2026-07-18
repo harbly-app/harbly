@@ -147,9 +147,31 @@ export interface AiRun {
 
 export const INBOX = "_inbox";
 
-/** Virtual folder id for the starred view — never a real path on disk
- * (folders can't be named this) and never a tag view (no "#" prefix). */
-export const FAVORITES = "::favorites";
+// Virtual views are addressed by sentinel strings STARTING WITH "/" — a
+// library-relative path can never start with a slash, so no real directory
+// (created in-app or in Finder, whatever its name) can ever collide with a
+// view. A folder literally named "#work" or "::favorites" stays a plain
+// folder. (INBOX above is different: it IS a real directory.)
+
+/** Virtual folder id for the starred view. */
+export const FAVORITES = "/::favorites";
+
+/** Prefix addressing a tag view; the tag name follows it verbatim. */
+export const TAG_PREFIX = "/#";
+
+/** The view id for a tag. */
+export const tagView = (name: string) => TAG_PREFIX + name;
+
+export const isTagView = (folder: string) => folder.startsWith(TAG_PREFIX);
+
+/** The tag name a tag-view id addresses. */
+export const tagOfView = (folder: string) => folder.slice(TAG_PREFIX.length);
+
+/** Where creation actions (new folder / note / page) land for the current
+ * view: virtual views and the inbox create in the library root; any real
+ * folder creates inside itself. */
+export const creationDest = (folder: string) =>
+  isTagView(folder) || folder === FAVORITES || folder === INBOX ? "" : folder;
 
 /** A Markdown asset — opened in the editor rather than the preview iframe. */
 export const isMd = (name: string) => /\.(md|markdown)$/i.test(name);

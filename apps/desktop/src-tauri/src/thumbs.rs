@@ -24,6 +24,19 @@ fn worker_loop(app: AppHandle, rx: Receiver<ThumbJob>) {
     while let Ok(job) = rx.recv() {
         let state = app.state::<crate::state::AppState>();
         let Ok(lib) = state.lib() else { continue };
+        // Re-resolve the asset at render time — the queue entry may be stale.
+        // A deleted asset (or a leftover job from a previous library) would
+        // render the protocol's 404 page, and its screenshot would be persisted
+        // as the thumbnail for that content hash forever; a content change since
+        // enqueue would file the new look under the old hash key.
+        let Ok(asset) = lib.asset(&job.asset_id) else {
+            continue;
+        };
+        let job = ThumbJob {
+            url: job.url,
+            asset_id: job.asset_id,
+            hash: asset.current_hash,
+        };
         let dest = lib.thumb_path(&job.hash);
         if dest.exists() || failed.contains(&job.hash) {
             continue;
@@ -126,6 +139,12 @@ fn ensure_window(app: &AppHandle, url: &str) -> Option<tauri::WebviewWindow> {
             .visible(false)
             .focused(false)
             .inner_size(1160.0, 760.0)
+            // The sandbox CSP constrains subresources but NOT navigation: a
+            // hostile asset could still `location=` / meta-refresh this hidden
+            // window to an external URL and exfiltrate data with zero user
+            // interaction. Thumbnails never need to navigate — pin the window
+            // to the internal asset scheme for its whole lifetime.
+            .on_navigation(|url| url.scheme() == "harbly-asset")
             .build()
             .ok()?;
     Some(w)

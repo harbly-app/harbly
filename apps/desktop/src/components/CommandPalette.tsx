@@ -14,7 +14,7 @@ import { api } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import type { SearchHit } from "../lib/types";
-import { INBOX, isHdoc, isMd } from "../lib/types";
+import { creationDest, INBOX, isHdoc, isMd } from "../lib/types";
 
 export default function CommandPalette() {
   const open = useStore((s) => s.paletteOpen);
@@ -170,8 +170,7 @@ function PaletteBody() {
                 value="cmd-newfolder"
                 onSelect={() => {
                   setPalette(false);
-                  const parent = st().folder === INBOX ? "" : st().folder;
-                  void st().doCreateFolder(parent, q.trim());
+                  void st().doCreateFolder(creationDest(st().folder), q.trim());
                 }}
                 className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 data-[selected=true]:bg-primary/10"
               >

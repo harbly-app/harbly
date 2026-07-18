@@ -21,7 +21,7 @@ mod byok;
 mod sse;
 pub mod tools;
 
-pub use agent::{detect_agent, AgentInfo};
+pub use agent::{detect_agent, kill_all_agent_groups, AgentInfo};
 
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};

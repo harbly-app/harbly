@@ -153,6 +153,12 @@ export function isImageOnlyPaste(cd: DataTransfer): boolean {
   if (cd.getData("text/plain").trim()) return false;
   const html = cd.getData("text/html");
   if (!html) return true;
+  // A ProseMirror-authored fragment — the editor's own copy of textless
+  // blocks (a figure, hr, toc, an empty table/stats) — is a structural paste,
+  // not an image paste: PM's parser must receive it. NSPasteboard holds no
+  // bitmap for it, so routing it to readClipboardImage would swallow the
+  // paste into a silent no-op.
+  if (html.includes("data-pm-slice")) return false;
   // DOMParser stays inert (no image fetches), unlike innerHTML on a live node.
   const doc = new DOMParser().parseFromString(html, "text/html");
   return !doc.body.textContent.trim();

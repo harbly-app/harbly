@@ -253,4 +253,120 @@ describe("hdoc round-trip", () => {
       ),
     ).toMatchObject({ ok: false, reason: "unsupported" });
   });
+
+  it("rejects executable URL values (lockstep with the Rust validator)", () => {
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><p><a href="javascript:alert(1)">x</a></p></h-doc>`,
+      ),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    expect(
+      parseHdoc(`<h-doc v="1"><img src="javascript:1" alt=""></h-doc>`),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    // Benign URLs keep parsing
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><p><a href="https://a/b#c">x</a> <a href="#t">y</a> <a href="mailto:a@b">z</a></p><h-figure><img src="data:image/png;base64,AA" alt=""></h-figure></h-doc>`,
+      ),
+    ).toMatchObject({ ok: true });
+  });
+
+  it("rejects structurally misplaced vocabulary instead of restructuring it", () => {
+    // PM's DOMParser silently lifts/moves nodes on a content-model mismatch;
+    // an edit + autosave would then write the restructured shape back. Every
+    // one of these must open read-only instead.
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><blockquote><p>a</p><ul><li>b</li></ul></blockquote></h-doc>`,
+      ),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><h-callout kind="note"><h-columns><h-column><p>x</p></h-column><h-column><p>y</p></h-column></h-columns></h-callout></h-doc>`,
+      ),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    expect(
+      parseHdoc(`<h-doc v="1"><h-stats><p>x</p></h-stats></h-doc>`),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><h-stat value="1" label="l"><p>x</p></h-stat></h-doc>`,
+      ),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    // A component inside a paragraph (HTML parsing does not auto-close <p>
+    // before custom elements) would be split out — refuse it too.
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><p>a<h-callout kind="note"><p>x</p></h-callout></p></h-doc>`,
+      ),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    // …including when the component hides inside a MARK tag (PM would empty
+    // the callout and lift its content into sibling paragraphs).
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><p>a<strong><h-callout kind="note"><p>x</p></h-callout></strong>b</p></h-doc>`,
+      ),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><h-card title="t"><strong><h-stat value="1" label="x"></h-stat></strong></h-card></h-doc>`,
+      ),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    // Restricted textblocks: pre is text-only (a mark would be silently
+    // unwrapped, an img lifted out); a figure is exactly one image (captions
+    // and extra images get moved out; a br gets dropped).
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><pre><code>x<strong>bold</strong>y</code></pre></h-doc>`,
+      ),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><pre><code>x</code><img src="a.png" alt=""></pre></h-doc>`,
+      ),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><h-figure><img src="a.png" alt="">caption</h-figure></h-doc>`,
+      ),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><h-figure><img src="a.png" alt=""><img src="b.png" alt=""></h-figure></h-doc>`,
+      ),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    expect(
+      parseHdoc(`<h-doc v="1"><h-figure><br></h-figure></h-doc>`),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+  });
+
+  it("rejects content PM would drop silently (href-less <a>, unicode-space in strict containers)", () => {
+    // The schema's only link rule is a[href] — a bare <a> would vanish on save
+    expect(
+      parseHdoc(`<h-doc v="1"><p>see <a>the appendix</a></p></h-doc>`),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    // U+00A0 is real content to PM but un-placeable in h-stats ("stat+") —
+    // it would be dropped on save. ASCII whitespace stays ignorable.
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><h-stats>\u00a0<h-stat value="1" label="l"></h-stat></h-stats></h-doc>`,
+      ),
+    ).toMatchObject({ ok: false, reason: "unsupported" });
+    expect(
+      parseHdoc(
+        `<h-doc v="1"><h-stats>\n  <h-stat value="1" label="l"></h-stat>\n</h-stats></h-doc>`,
+      ),
+    ).toMatchObject({ ok: true });
+  });
+
+  it("still accepts benign non-canonical shapes (fill, not restructure)", () => {
+    // Loose text in a container is wrapped in place, an empty card is filled
+    // with an empty paragraph — nothing moves, so these stay editable.
+    expect(
+      parseHdoc(`<h-doc v="1"><h-card title="t">loose text</h-card></h-doc>`),
+    ).toMatchObject({ ok: true });
+    expect(
+      parseHdoc(`<h-doc v="1"><h-card title="t"></h-card></h-doc>`),
+    ).toMatchObject({ ok: true });
+  });
 });

@@ -26,7 +26,14 @@ import { api } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import { dragJustEnded, useStore } from "../lib/store";
 import type { TreeFile, TreeNode } from "../lib/types";
-import { FAVORITES, INBOX, isHdoc, isMd, stemName } from "../lib/types";
+import {
+  FAVORITES,
+  INBOX,
+  isHdoc,
+  isMd,
+  stemName,
+  tagView,
+} from "../lib/types";
 import { dragStartHandler } from "../lib/drag";
 import { menuContentCls, MItem, MSep } from "./menu";
 import RenameInput from "./RenameInput";
@@ -192,11 +199,11 @@ export default function Sidebar() {
                 {t("tagsSection")}
               </div>
               {tags.map((t) => {
-                const active = folder === `#${t.name}` && !viewerId;
+                const active = folder === tagView(t.name) && !viewerId;
                 return (
                   <button
                     key={t.name}
-                    onClick={() => gotoFolder(`#${t.name}`)}
+                    onClick={() => gotoFolder(tagView(t.name))}
                     className={`flex w-full items-center gap-1.5 rounded-ctl px-2.5 py-1.5 text-[12.5px] transition ${
                       active
                         ? "bg-primary/10 font-bold text-primary"
@@ -449,11 +456,18 @@ function FileRow(props: {
           <MItem
             icon={<ExternalLink className="h-3.5 w-3.5" />}
             label={
-              isMd(f.name) || isHdoc(f.name)
-                ? t("openWithDefaultApp")
-                : t("openInBrowser")
+              isHdoc(f.name)
+                ? t("previewInBrowser")
+                : isMd(f.name)
+                  ? t("openWithDefaultApp")
+                  : t("openInBrowser")
             }
-            onClick={() => api.openInBrowser(f.id).catch(() => {})}
+            onClick={() =>
+              // .hdoc has no default app — bake and open in the browser, same as the grid
+              isHdoc(f.name)
+                ? api.previewHdoc(f.id).catch(() => {})
+                : api.openInBrowser(f.id).catch(() => {})
+            }
           />
           <MItem
             icon={<FolderOpen className="h-3.5 w-3.5" />}

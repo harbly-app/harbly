@@ -27,6 +27,16 @@ pub struct AppState {
     pub redo_stack: Mutex<Vec<OpEntry>>,
     /// UI language (zh-CN/zh-TW/en/ja/ko/es), persisted in config.json
     pub lang: Mutex<String>,
+    /// Serializes undo/redo execution end-to-end. Executing an entry spans a
+    /// spawn_blocking (file moves + a full scan, seconds on a big library);
+    /// a second ⌘Z arriving meanwhile must wait for it, not run a second
+    /// inverse concurrently over the same paths.
+    pub undo_exec: tokio::sync::Mutex<()>,
+    /// Bumped on every library activation. In-flight undo executions compare
+    /// generations before pushing their inverse entry, so an entry carrying
+    /// the OLD library's absolute paths can never enter the NEW library's
+    /// stacks (where ⌘Z would replay it against the wrong library).
+    pub lib_generation: std::sync::atomic::AtomicU64,
     /// Running AI tasks: frontend job id → cancel flag. Entries are removed
     /// when the run finishes; ai_cancel flips the flag cooperatively.
     pub ai_jobs: Mutex<std::collections::HashMap<String, harbly_ai::CancelFlag>>,
@@ -50,8 +60,14 @@ pub struct AppState {
 /// Created → move into the Trash; inverse result is Trashed. The three form a
 /// closed loop, so undo and redo are naturally symmetric.
 pub enum FileOp {
-    /// Items are now in the Trash: (landing path in Trash, original location)
-    Trashed { moves: Vec<(PathBuf, PathBuf)> },
+    /// Items are now in the Trash: (landing path in Trash, original location).
+    /// `assets` snapshots the rows forgotten alongside the files — the trash
+    /// undo re-registers each under its ORIGINAL id, reconnecting the version
+    /// chain and AI-run history that a fresh scan-minted id would orphan.
+    Trashed {
+        moves: Vec<(PathBuf, PathBuf)>,
+        assets: Vec<harbly_core::AssetMeta>,
+    },
     /// Items were moved from before to after: (before, after)
     Moved { moves: Vec<(PathBuf, PathBuf)> },
     /// Items were produced by this operation (copy/new/import/paste) and now live at these paths

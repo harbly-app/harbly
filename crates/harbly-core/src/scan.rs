@@ -72,19 +72,7 @@ impl Library {
         // / moved out of the library). Version snapshots follow the file into the
         // system Trash rather than being hard-deleted, so an external delete stays
         // recoverable.
-        let stale: Vec<String> = {
-            let db = self.db.lock().unwrap();
-            let mut stmt = db.prepare("SELECT id, rel_path FROM assets")?;
-            let rows: Vec<(String, String)> = stmt
-                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-                .filter_map(|r| r.ok())
-                .collect();
-            rows.into_iter()
-                .filter(|(_, rel)| !seen.contains(rel))
-                .map(|(id, _)| id)
-                .collect()
-        };
-        for id in stale {
+        for id in self.stale_asset_ids(&seen)? {
             self.remove_asset_rows(&id, true)?;
             sum.removed += 1;
         }
@@ -96,6 +84,43 @@ impl Library {
             sum.tags_synced = self.sync_tags_from_disk()?;
         }
         Ok(sum)
+    }
+
+    /// Case-exact existence probe. `Path::exists()` resolves case-insensitively
+    /// on default APFS, so after a case-only Finder rename (Report.html →
+    /// report.html) the OLD path still "exists" — comparing the canonical
+    /// on-disk spelling against the recorded rel byte-wise tells them apart
+    /// (for every path component, not just the file name, so folder case
+    /// renames are covered too).
+    pub(crate) fn exists_case_exact(&self, rel: &str) -> bool {
+        let abs = self.abs(rel);
+        let (Ok(canon), Ok(root)) = (abs.canonicalize(), self.root().canonicalize()) else {
+            return false;
+        };
+        canon == root.join(rel)
+    }
+
+    /// Rows the scanner should treat as externally deleted. `seen` is the walk
+    /// snapshot taken when the scan STARTED; rows inserted while the scan was
+    /// running (import, new note, AI write on another thread) are not in it,
+    /// so a fresh existence check on the actual disk decides — never the
+    /// snapshot alone. Without it a concurrent create gets purged (rows AND
+    /// version dir) as if the user had deleted it in Finder.
+    fn stale_asset_ids(&self, seen: &HashSet<String>) -> Result<Vec<String>> {
+        let rows: Vec<(String, String)> = {
+            let db = self.db.lock().unwrap();
+            let mut stmt = db.prepare("SELECT id, rel_path FROM assets")?;
+            let rows = stmt
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                .filter_map(|r| r.ok())
+                .collect();
+            rows
+        };
+        Ok(rows
+            .into_iter()
+            .filter(|(_, rel)| !seen.contains(rel) && !self.exists_case_exact(rel))
+            .map(|(id, _)| id)
+            .collect())
     }
 
     /// One-time migration: early versions stored tags only in the database — write them out to file xattrs;
@@ -190,26 +215,51 @@ impl Library {
                 }
             }
             None => {
-                // New path: hash matches an in-library asset whose old path is gone → Finder move; rebind the path without losing history
-                let moved: Option<(String, String)> = {
+                // New path: hash matches an in-library asset whose old path is gone → Finder move; rebind the path without losing history.
+                // Same-content assets are common (fresh empty notes, duplicates), so
+                // consider EVERY hash match and rebind the one whose file actually
+                // left the disk — a LIMIT 1 pick can land on an asset that still
+                // exists, forcing a spurious insert here and a stale purge of the
+                // real record (id, versions, AI runs) at the end of the scan.
+                let candidates: Vec<(String, String)> = {
                     let db = self.db.lock().unwrap();
-                    db.query_row(
-                        "SELECT id, rel_path FROM assets WHERE current_hash=?1 LIMIT 1",
-                        [&hash],
-                        |r| Ok((r.get(0)?, r.get(1)?)),
-                    )
-                    .optional()?
+                    let mut stmt =
+                        db.prepare("SELECT id, rel_path FROM assets WHERE current_hash=?1")?;
+                    let rows = stmt
+                        .query_map([&hash], |r| {
+                            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                        })?
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    rows
                 };
-                if let Some((id, old_rel)) = moved {
-                    if !self.abs(&old_rel).exists() {
-                        let db = self.db.lock().unwrap();
-                        db.execute(
-                            "UPDATE assets SET rel_path=?1, folder=?2, mtime=?3, updated_at=?4 WHERE id=?5",
-                            params![rel, parent_folder(rel), mtime, now(), id],
-                        )?;
-                        sum.moved += 1;
-                        return Ok(());
-                    }
+                // Among the vanished candidates, prefer the one whose FILE NAME
+                // matches the new path: identical-content assets can have very
+                // different pasts (version chains, AI runs), and readdir order
+                // must not decide which history a renamed folder's files adopt.
+                // Case-insensitively — a batch case-only rename (A.md → a.md)
+                // vacates the old spellings on APFS, and the byte-exact form
+                // would fall back to row order for exactly those renames.
+                let gone: Vec<(String, String)> = candidates
+                    .into_iter()
+                    .filter(|(_, old_rel)| !self.exists_case_exact(old_rel))
+                    .collect();
+                let new_name = rel.rsplit('/').next().unwrap_or(rel).to_lowercase();
+                let moved = gone
+                    .iter()
+                    .find(|(_, old_rel)| {
+                        old_rel.rsplit('/').next().unwrap_or(old_rel).to_lowercase() == new_name
+                    })
+                    .or_else(|| gone.first())
+                    .cloned();
+                if let Some((id, _)) = moved {
+                    let db = self.db.lock().unwrap();
+                    db.execute(
+                        "UPDATE assets SET rel_path=?1, folder=?2, mtime=?3, updated_at=?4 WHERE id=?5",
+                        params![rel, parent_folder(rel), mtime, now(), id],
+                    )?;
+                    sum.moved += 1;
+                    return Ok(());
                 }
                 self.insert_new_asset(rel, &content, &hash, size, mtime, "import", "初始导入")?;
                 sum.added += 1;
@@ -264,6 +314,69 @@ impl Library {
             }
         }
         Ok(id)
+    }
+
+    /// Reverse of [`Library::forget_asset`], for the trash-undo path: the file
+    /// and its version snapshots are back from the Trash — re-register the SAME
+    /// asset id so the preserved version and AI-run rows reconnect, instead of
+    /// letting the next scan mint a fresh id (which would orphan both forever).
+    /// `rel` is where the file actually landed (a restore dodges to a suffixed
+    /// name when the original path got reoccupied). No-op if the id or the path
+    /// is already registered — the scan then handles the file as usual.
+    pub fn resurrect_asset(&self, meta: &AssetMeta, rel: &str) -> Result<()> {
+        let abs = self.abs(rel);
+        let content = std::fs::read(&abs)?;
+        let hash = blake3::hash(&content).to_hex().to_string();
+        let md = std::fs::metadata(&abs)?;
+        let text = String::from_utf8_lossy(&content);
+        let ex = extract_for(rel, &text);
+        let title = ex.title.unwrap_or_else(|| file_stem(rel));
+        {
+            let db = self.db.lock().unwrap();
+            let occupied: Option<String> = db
+                .query_row(
+                    "SELECT id FROM assets WHERE id=?1 OR rel_path=?2",
+                    params![meta.id, rel],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if occupied.is_some() {
+                return Ok(());
+            }
+            db.execute(
+                "INSERT INTO assets(id, rel_path, folder, title, source, current_hash, size_bytes, mtime, created_at, updated_at)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                params![
+                    meta.id,
+                    rel,
+                    parent_folder(rel),
+                    title,
+                    meta.source,
+                    hash,
+                    md.len() as i64,
+                    crate::mtime_secs(&md),
+                    meta.created_at,
+                    now()
+                ],
+            )?;
+            db.execute("DELETE FROM fts WHERE asset_id=?1", [&meta.id])?;
+            db.execute(
+                "INSERT INTO fts(asset_id, title, body) VALUES(?1,?2,?3)",
+                params![meta.id, self.seg(&title), self.seg(&ex.body)],
+            )?;
+        }
+        // Tags & star ride the file's xattrs and came back with it from the Trash
+        #[cfg(target_os = "macos")]
+        {
+            let disk = crate::tags_xattr::read_tags(&abs);
+            if !disk.is_empty() {
+                self.set_tags_db(&meta.id, &disk)?;
+            }
+            if crate::tags_xattr::read_favorite(&abs) {
+                self.set_favorite_db(&meta.id, true)?;
+            }
+        }
+        Ok(())
     }
 
     /// Content change (external edit / rollback): update metadata and index, and append a full version
@@ -333,8 +446,6 @@ impl Library {
         label: &str,
     ) -> Result<i64> {
         let ext = self.asset_ext(asset_id);
-        let dir = self.versions_dir().join(asset_id);
-        std::fs::create_dir_all(&dir)?;
         // Dedup check + number allocation happen in ONE statement under the
         // database's write serialization: concurrent writers (a second AI
         // turn in-process, or the harbly-mcp process) can never both claim
@@ -342,6 +453,19 @@ impl Library {
         // INSERT after the file was already on disk.
         let next = {
             let db = self.db.lock().unwrap();
+            // The asset row must exist, checked under the SAME lock as the
+            // allocation: every caller writes versions for registered assets,
+            // and a version row minted for a just-forgotten id (editor rescue
+            // racing a trash) would recreate the versions dir mid-trash and
+            // collide with the trashed history on a later undo.
+            let registered: Option<String> = db
+                .query_row("SELECT id FROM assets WHERE id=?1", [asset_id], |r| {
+                    r.get(0)
+                })
+                .optional()?;
+            if registered.is_none() {
+                return Err(crate::HarblyError::msg("资产不存在"));
+            }
             let last: Option<(i64, String)> = db
                 .query_row(
                     "SELECT ver, hash FROM versions WHERE asset_id=?1 ORDER BY ver DESC LIMIT 1",
@@ -365,7 +489,10 @@ impl Library {
         // Snapshot file after the row is reserved (distinct numbers → distinct
         // files, no clobbering); roll the row back if the disk write fails so
         // no phantom version remains.
-        if let Err(e) = std::fs::write(dir.join(format!("v{next}.{ext}")), content) {
+        let dir = self.versions_dir().join(asset_id);
+        let written = std::fs::create_dir_all(&dir)
+            .and_then(|()| std::fs::write(dir.join(format!("v{next}.{ext}")), content));
+        if let Err(e) = written {
             let db = self.db.lock().unwrap();
             let _ = db.execute(
                 "DELETE FROM versions WHERE asset_id=?1 AND ver=?2",
@@ -543,6 +670,136 @@ mod tests {
         assert_eq!(vs.len(), 1);
         // The real v1 (its file exists) survives the sweep
         assert!(lib.version_file_path(&a.id, 1).is_file());
+    }
+
+    #[test]
+    fn stale_check_requires_file_actually_missing() {
+        // A row whose rel_path is absent from the walk snapshot but whose file
+        // exists on disk (created concurrently while a scan was running) must
+        // NOT be treated as an external delete.
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = crate::Library::open_or_create(tmp.path().join("L")).unwrap();
+        std::fs::write(
+            lib.root().join("a.html"),
+            "<html><title>A</title><body>x</body></html>",
+        )
+        .unwrap();
+        lib.scan(|_| {}).unwrap();
+        let a = lib
+            .list_assets("", crate::SortKey::Recent)
+            .unwrap()
+            .remove(0);
+
+        // Empty snapshot = the scanner never saw this path; the file exists → spared.
+        let empty = std::collections::HashSet::new();
+        assert!(lib.stale_asset_ids(&empty).unwrap().is_empty());
+
+        // File really gone → now it is stale.
+        std::fs::remove_file(lib.root().join("a.html")).unwrap();
+        assert_eq!(lib.stale_asset_ids(&empty).unwrap(), vec![a.id]);
+    }
+
+    #[test]
+    fn rename_folder_rebinds_same_content_files() {
+        // Two identical (empty) notes share a content hash. Renaming their
+        // folder must rebind BOTH asset rows to the new paths — the old
+        // LIMIT 1 rebind matched the already-rebound row for the second file,
+        // registered it as new, and purged the original id + history.
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = crate::Library::open_or_create(tmp.path().join("L")).unwrap();
+        lib.create_folder("", "F").unwrap();
+        let a = lib.create_markdown_asset("F", "a").unwrap();
+        let b = lib.create_markdown_asset("F", "b").unwrap();
+        assert_eq!(a.current_hash, b.current_hash);
+
+        lib.rename_folder("F", "G").unwrap();
+
+        let mut ids: Vec<String> = lib
+            .list_assets("G", crate::SortKey::Recent)
+            .unwrap()
+            .into_iter()
+            .map(|x| x.id)
+            .collect();
+        ids.sort();
+        let mut want = vec![a.id.clone(), b.id.clone()];
+        want.sort();
+        assert_eq!(ids, want, "both original asset ids must survive the rename");
+        assert_eq!(lib.list_versions(&a.id).unwrap().len(), 1);
+        assert_eq!(lib.list_versions(&b.id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn case_only_rename_rebinds_instead_of_duplicating() {
+        // On case-insensitive APFS, Path::exists() says the OLD spelling still
+        // exists after a case-only rename — a naive exists() check would spare
+        // the stale row forever AND refuse the rebind, leaving two rows for
+        // one physical file. exists_case_exact must see through it.
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = crate::Library::open_or_create(tmp.path().join("L")).unwrap();
+        std::fs::write(
+            lib.root().join("Report.html"),
+            "<html><title>R</title><body>x</body></html>",
+        )
+        .unwrap();
+        lib.scan(|_| {}).unwrap();
+        let a = lib
+            .list_assets("", crate::SortKey::Recent)
+            .unwrap()
+            .remove(0);
+
+        std::fs::rename(
+            lib.root().join("Report.html"),
+            lib.root().join("report.html"),
+        )
+        .unwrap();
+        lib.scan(|_| {}).unwrap();
+
+        let assets = lib.list_assets("", crate::SortKey::Recent).unwrap();
+        assert_eq!(assets.len(), 1, "one physical file must stay one asset");
+        assert_eq!(
+            assets[0].id, a.id,
+            "the rename must rebind, not re-register"
+        );
+        assert_eq!(assets[0].rel_path, "report.html");
+    }
+
+    #[test]
+    fn batch_case_only_rename_keeps_each_history() {
+        // Both old spellings are vacated at once, so the name preference must
+        // match case-insensitively — byte-exact matching would fall back to
+        // row order and could swap the two assets' histories.
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = crate::Library::open_or_create(tmp.path().join("L")).unwrap();
+        lib.create_folder("", "F").unwrap();
+        let a = lib.create_markdown_asset("F", "Alpha").unwrap();
+        let b = lib.create_markdown_asset("F", "Beta").unwrap();
+        assert_eq!(a.current_hash, b.current_hash);
+
+        std::fs::rename(lib.root().join("F/Alpha.md"), lib.root().join("F/alpha.md")).unwrap();
+        std::fs::rename(lib.root().join("F/Beta.md"), lib.root().join("F/beta.md")).unwrap();
+        lib.scan(|_| {}).unwrap();
+
+        assert_eq!(lib.asset(&a.id).unwrap().rel_path, "F/alpha.md");
+        assert_eq!(lib.asset(&b.id).unwrap().rel_path, "F/beta.md");
+    }
+
+    #[test]
+    fn rebind_prefers_matching_file_name() {
+        // Two identical-content files renamed together must each keep THEIR
+        // OWN row — readdir order must not let a.md adopt b.md's history.
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = crate::Library::open_or_create(tmp.path().join("L")).unwrap();
+        lib.create_folder("", "F").unwrap();
+        let a = lib.create_markdown_asset("F", "a").unwrap();
+        let b = lib.create_markdown_asset("F", "b").unwrap();
+        assert_eq!(a.current_hash, b.current_hash);
+
+        lib.rename_folder("F", "G").unwrap();
+
+        let after_a = lib.asset(&a.id).unwrap();
+        let after_b = lib.asset(&b.id).unwrap();
+        assert_eq!(after_a.rel_path, "G/a.md", "a's row must follow a.md");
+        assert_eq!(after_b.rel_path, "G/b.md", "b's row must follow b.md");
     }
 
     #[test]

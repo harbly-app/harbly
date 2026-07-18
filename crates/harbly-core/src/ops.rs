@@ -259,6 +259,13 @@ impl Library {
         } else {
             format!("{parent_rel}/{name}")
         };
+        // A parent that abs() would refuse (absolute path, traversal, a view
+        // sentinel leaking through) must error out loud — otherwise the write
+        // lands in abs()'s "__invalid__" quarantine dir and silently pollutes
+        // the library.
+        if std::path::Path::new(&rel).is_absolute() || rel.split('/').any(|c| c == "..") {
+            return Err(HarblyError::msg("无效的文件夹名"));
+        }
         std::fs::create_dir_all(self.abs(&rel))?;
         Ok(rel)
     }
@@ -644,11 +651,22 @@ impl Library {
         self.asset(id)
     }
 
-    /// Clear only the index records and thumbnail, leaving the disk file alone (the caller has already handled where the file goes)
+    /// Clear the listing-visible records (asset row, FTS, tags) and thumbnail,
+    /// leaving the disk file alone — the caller has already handled where the
+    /// file goes. Version and AI-run rows are deliberately KEPT: this is the
+    /// undoable-trash path, and [`Library::resurrect_asset`] reconnects them
+    /// when the user undoes. If the undo never comes, the version rows are
+    /// reclaimed by `sweep_orphan_versions` at the next library open — their
+    /// snapshot files went to the Trash with the asset, and undo stacks don't
+    /// survive a restart, so nothing can still reference them by then. (Orphan
+    /// ai_runs rows linger; they are invisible without their asset and tiny.)
     pub fn forget_asset(&self, id: &str) -> Result<()> {
         let cur = self.asset(id)?;
         let _ = std::fs::remove_file(self.thumb_path(&cur.current_hash));
-        self.remove_asset_rows(id, false)?;
+        let db = self.db.lock().unwrap();
+        db.execute("DELETE FROM assets WHERE id=?1", [id])?;
+        db.execute("DELETE FROM fts WHERE asset_id=?1", [id])?;
+        db.execute("DELETE FROM asset_tags WHERE asset_id=?1", [id])?;
         Ok(())
     }
 
@@ -691,15 +709,53 @@ impl Library {
         let hash = blake3::hash(&content).to_hex().to_string();
         let cur = self.asset(id)?;
         let abs = self.abs(&cur.rel_path);
-        std::fs::write(&abs, &content)?;
+        // The live file may hold autosaved edits NO version has captured (the
+        // editor versions once per session, at checkpoint). Snapshot before the
+        // overwrite — write_version's dedup makes this free when the content is
+        // already the newest snapshot. Same rule as apply_ai_output.
+        if let Ok(live) = std::fs::read(&abs) {
+            let live_hash = blake3::hash(&live).to_hex().to_string();
+            self.write_version(id, &live, &live_hash, "编辑")?;
+        }
+        self.replace_asset_file(&abs, &cur.file_name, &content)?;
         let md = std::fs::metadata(&abs)?;
-        let mtime = md
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-        self.update_asset_content(id, &content, &hash, mtime, &format!("回滚到 v{ver}"))?;
+        self.update_asset_content(
+            id,
+            &content,
+            &hash,
+            crate::mtime_secs(&md),
+            &format!("回滚到 v{ver}"),
+        )?;
+        Ok(())
+    }
+
+    /// Atomically replace an asset's on-disk file (same-dir temp + rename),
+    /// carrying the existing file's Finder tags onto the replacement. The dot
+    /// prefix keeps the file watcher quiet until the final rename, so a scan
+    /// never observes the half-written temp file.
+    fn replace_asset_file(
+        &self,
+        abs: &std::path::Path,
+        file_name: &str,
+        bytes: &[u8],
+    ) -> Result<()> {
+        let dir = abs
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| self.root().to_path_buf());
+        let tmp = dir.join(format!(
+            ".{}.tmp-{}",
+            file_name,
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::write(&tmp, bytes)?;
+        // std::fs::rename does not carry xattrs from the destination; copy the
+        // asset's Finder tags onto the temp file so the atomic replace keeps them.
+        let _ = crate::tags_xattr::copy_tags(abs, &tmp);
+        if let Err(e) = std::fs::rename(&tmp, abs) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
         Ok(())
     }
 
@@ -716,25 +772,7 @@ impl Library {
     pub fn write_asset_text(&self, id: &str, text: &str) -> Result<AssetMeta> {
         let cur = self.asset(id)?;
         let abs = self.abs(&cur.rel_path);
-        let dir = abs
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| self.root().to_path_buf());
-        // The dot prefix keeps the file watcher quiet until the final rename, so a
-        // scan never observes the half-written temp file.
-        let tmp = dir.join(format!(
-            ".{}.tmp-{}",
-            cur.file_name,
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::write(&tmp, text.as_bytes())?;
-        // std::fs::rename does not carry xattrs from the destination; copy the
-        // asset's Finder tags onto the temp file so the atomic replace keeps them.
-        let _ = crate::tags_xattr::copy_tags(&abs, &tmp);
-        if let Err(e) = std::fs::rename(&tmp, &abs) {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(e.into());
-        }
+        self.replace_asset_file(&abs, &cur.file_name, text.as_bytes())?;
         let content = text.as_bytes();
         let hash = blake3::hash(content).to_hex().to_string();
         let md = std::fs::metadata(&abs)?;
@@ -762,6 +800,22 @@ impl Library {
         let hash = blake3::hash(&content).to_hex().to_string();
         let ver = self.write_version(id, &content, &hash, "编辑")?;
         Ok(Some(ver))
+    }
+
+    /// Snapshot arbitrary text as a version WITHOUT touching the live file.
+    /// The editor's teardown uses this when an unresolved external-edit
+    /// conflict froze autosave: the user's local buffer must not vanish with
+    /// the editor, but writing it to the live file would silently pick their
+    /// side of the conflict. write_version's dedup keeps repeats idempotent.
+    pub fn snapshot_text_version(&self, id: &str, text: &str, label: &str) -> Result<i64> {
+        // A forgotten/trashed id must error like every other write path — a
+        // silent success here would recreate the versions dir (with a
+        // defaulted extension) for an asset mid-trash, colliding with the
+        // trashed history when an undo later moves it back.
+        self.asset(id)?;
+        let content = text.as_bytes();
+        let hash = blake3::hash(content).to_hex().to_string();
+        self.write_version(id, content, &hash, label)
     }
 
     /// Create a new empty Markdown asset in `folder` and register it. `name_stem`

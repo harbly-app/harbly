@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useImeGuard } from "../lib/ime";
 
 /// Finder-style in-place rename: auto select-all, Enter commits, Esc cancels, blur commits (exits silently if unchanged)
 export default function RenameInput(props: {
@@ -9,6 +10,7 @@ export default function RenameInput(props: {
 }) {
   const [v, setV] = useState(props.initial);
   const done = useRef(false); // The blur right after an Enter commit must not fire a second time
+  const ime = useImeGuard();
 
   const commit = () => {
     if (done.current) return;
@@ -30,8 +32,12 @@ export default function RenameInput(props: {
       onChange={(e) => setV(e.target.value)}
       onFocus={(e) => e.target.select()}
       onBlur={commit}
+      onCompositionEnd={ime.end}
       onKeyDown={(e) => {
         e.stopPropagation();
+        // IME keys belong to the composer — a candidate-confirming Enter must
+        // not commit a half-typed pinyin string as the real file name.
+        if (ime.guarded(e.nativeEvent)) return;
         if (e.key === "Enter") commit();
         else if (e.key === "Escape") cancel();
       }}

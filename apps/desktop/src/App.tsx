@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./lib/api";
 import { makeT } from "./lib/i18n";
 import { useStore } from "./lib/store";
-import { INBOX, isHdoc, isMd } from "./lib/types";
+import { creationDest, isHdoc, isMd } from "./lib/types";
 import Onboarding from "./components/Onboarding";
 import TitleBar from "./components/TitleBar";
 import Sidebar from "./components/Sidebar";
@@ -87,8 +87,7 @@ export default function App() {
         case "new-folder":
           st.setModal({
             kind: "newFolder",
-            parent:
-              st.folder.startsWith("#") || st.folder === INBOX ? "" : st.folder,
+            parent: creationDest(st.folder),
           });
           break;
         case "reveal-library":

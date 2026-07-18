@@ -174,6 +174,7 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
       dirty.v = false;
       conflicted.v = false;
       setConflict(false);
+      ready.v = true;
     };
 
     const undo = () => crepe?.editor.action(callCommand(undoCommand.key));
@@ -240,11 +241,31 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
       if (saveTimer) clearTimeout(saveTimer);
       useStore.getState().setEditorHandle(null);
       const dying = crepe;
+      // An unresolved conflict froze autosave, so the flush below will bail —
+      // and the buffer is about to die with the editor. Rescue the local
+      // edits as a version snapshot (never the live file: the user hasn't
+      // chosen a side of the conflict). Serialize NOW, synchronously, while
+      // the editor is still alive.
+      let rescue: string | null = null;
+      if (conflicted.v && dirty.v && crepe) {
+        try {
+          rescue = frontmatter.v + crepe.getMarkdown();
+        } catch {
+          /* already torn down */
+        }
+      }
       // Flush the pending edit FIRST, while `crepe`/`ready` are still valid —
       // clearing them up front would make doWrite bail and silently drop an edit
       // typed within the autosave debounce when switching documents. Only after
       // the flush do we stop accepting writes, checkpoint the session, and destroy.
       void (async () => {
+        if (rescue !== null) {
+          try {
+            await api.assetSnapshotText(id, rescue);
+          } catch {
+            /* the file may have been deleted mid-session */
+          }
+        }
         try {
           await save();
         } catch {

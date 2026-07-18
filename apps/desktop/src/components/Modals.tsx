@@ -14,6 +14,7 @@ import {
 import { useEffect, useState } from "react";
 import { api, versionUrl } from "../lib/api";
 import { LANGS, makeT } from "../lib/i18n";
+import { useImeGuard } from "../lib/ime";
 import { useStore } from "../lib/store";
 import type { ThemePref } from "../lib/theme";
 import type { AgentInfo, ByokProvider, TreeNode } from "../lib/types";
@@ -25,14 +26,27 @@ export default function Modals() {
 
   useEffect(() => {
     if (!modal) return;
+    // IME-aware Escape: while composing, Esc dismisses the candidate word —
+    // it must not tear down the whole dialog (losing everything typed so
+    // far). compositionend bubbles to window, so one listener pair covers
+    // every input inside the modal.
+    let composeEndAt = 0;
+    const onCompositionEnd = () => {
+      composeEndAt = Date.now();
+    };
     const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing || Date.now() - composeEndAt < 100) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         setModal(null);
       }
     };
+    window.addEventListener("compositionend", onCompositionEnd, true);
     window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("compositionend", onCompositionEnd, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
   }, [modal, setModal]);
 
   if (!modal) return null;
@@ -151,6 +165,7 @@ function NewFolder() {
   const doCreateFolder = useStore((s) => s.doCreateFolder);
   const t = makeT(useStore((s) => s.lang));
   const [name, setName] = useState("");
+  const ime = useImeGuard();
   const parent = modal?.kind === "newFolder" ? modal.parent : "";
 
   const ok = () => name.trim() && doCreateFolder(parent, name.trim());
@@ -165,7 +180,10 @@ function NewFolder() {
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && ok()}
+        onCompositionEnd={ime.end}
+        onKeyDown={(e) =>
+          !ime.guarded(e.nativeEvent) && e.key === "Enter" && ok()
+        }
         placeholder={t("folderNamePlaceholder")}
         className="h-9 w-full rounded-ctl border border-line bg-side px-3 text-[13px] outline-none focus:border-primary"
       />
@@ -210,6 +228,7 @@ function Tags() {
     new Set(asset?.tags ?? []),
   );
   const [input, setInput] = useState("");
+  const ime = useImeGuard();
 
   if (!asset) return null;
 
@@ -255,8 +274,9 @@ function Tags() {
         autoFocus
         value={input}
         onChange={(e) => setInput(e.target.value)}
+        onCompositionEnd={ime.end}
         onKeyDown={(e) => {
-          if (e.key !== "Enter") return;
+          if (ime.guarded(e.nativeEvent) || e.key !== "Enter") return;
           // Has content = add as a candidate; empty input = save directly
           if (input.trim()) addInput();
           else void ok();
@@ -389,6 +409,7 @@ function AiSettings() {
                   }
                   onBlur={() => void saveKey(p)}
                   onKeyDown={(e) => {
+                    if (e.nativeEvent.isComposing) return;
                     if (e.key === "Enter") void saveKey(p);
                   }}
                   placeholder={

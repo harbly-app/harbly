@@ -24,7 +24,14 @@ import { makeT } from "../lib/i18n";
 import { dragJustEnded, useStore } from "../lib/store";
 import type { DragPayload } from "../lib/store";
 import type { AssetMeta, SortKey } from "../lib/types";
-import { INBOX, isHdoc, isMd, stemName } from "../lib/types";
+import {
+  INBOX,
+  isHdoc,
+  isMd,
+  isTagView,
+  stemName,
+  tagOfView,
+} from "../lib/types";
 import { dragStartHandler } from "../lib/drag";
 import { menuContentCls, MItem, MSep } from "./menu";
 import RenameInput from "./RenameInput";
@@ -189,14 +196,14 @@ export default function AssetGrid() {
   }, []);
 
   const t = makeT(useStore((s) => s.lang));
-  const isTag = folder.startsWith("#");
+  const isTag = isTagView(folder);
   const title =
     folder === INBOX
       ? t("inbox")
       : folder === ""
         ? t("allAssets")
         : isTag
-          ? folder
+          ? `#${tagOfView(folder)}`
           : folder.split("/").pop();
   const parent =
     !isTag && folder !== INBOX && folder.includes("/")

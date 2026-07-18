@@ -409,6 +409,61 @@ fn write_text_autosaves_without_versioning() {
 }
 
 #[test]
+fn forget_then_resurrect_preserves_id_and_history() {
+    let (tmp, lib) = setup();
+    let a = lib.create_markdown_asset("", "笔记").unwrap();
+    lib.write_asset_text(&a.id, "# 内容").unwrap();
+    lib.checkpoint_version(&a.id, &a.current_hash).unwrap();
+    assert_eq!(lib.list_versions(&a.id).unwrap().len(), 2);
+
+    // Simulate the undoable trash: the file leaves the library, rows forgotten
+    let abs = lib.root().join("笔记.md");
+    let stash = tmp.path().join("stash.md");
+    fs::rename(&abs, &stash).unwrap();
+    lib.forget_asset(&a.id).unwrap();
+    assert!(lib.list_assets("", SortKey::Recent).unwrap().is_empty());
+    // Version rows deliberately survive the forget (the undo may reconnect them)
+    assert_eq!(lib.list_versions(&a.id).unwrap().len(), 2);
+
+    // Undo: the file comes back; resurrect reconnects the SAME id + history
+    fs::rename(&stash, &abs).unwrap();
+    lib.resurrect_asset(&a, "笔记.md").unwrap();
+    let assets = lib.list_assets("", SortKey::Recent).unwrap();
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0].id, a.id);
+    assert_eq!(assets[0].ver_count, 2);
+    assert!(assets[0].title.contains("内容"));
+
+    // A follow-up scan sees a registered, unchanged path — nothing re-registers
+    let sum = lib.scan(|_| {}).unwrap();
+    assert!(!sum.changed());
+    assert_eq!(lib.list_assets("", SortKey::Recent).unwrap().len(), 1);
+}
+
+#[test]
+fn restore_version_snapshots_unversioned_live_edits() {
+    let (_tmp, lib) = setup();
+    let a = lib.create_markdown_asset("", "笔记").unwrap();
+
+    // Autosaved edit: on disk, but captured by NO version yet
+    lib.write_asset_text(&a.id, "# 只有 autosave 的内容")
+        .unwrap();
+    assert_eq!(lib.asset(&a.id).unwrap().ver_count, 1);
+
+    // Rolling back to v1 must first snapshot the live edit, then append the
+    // rollback — the edit stays recoverable instead of being overwritten.
+    lib.restore_version(&a.id, 1).unwrap();
+    let vs = lib.list_versions(&a.id).unwrap();
+    assert_eq!(vs.len(), 3);
+    assert_eq!(vs[1].label, "编辑");
+    assert_eq!(vs[0].label, "回滚到 v1");
+    let rescued = fs::read_to_string(lib.version_file_path(&a.id, 2)).unwrap();
+    assert!(rescued.contains("只有 autosave 的内容"));
+    // The live file now holds v1's (empty) content again
+    assert_eq!(lib.read_asset_text(&a.id).unwrap(), "");
+}
+
+#[test]
 fn import_mixed_html_and_markdown() {
     let (tmp, lib) = setup();
     let outside = tmp.path().join("outside");

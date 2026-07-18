@@ -47,6 +47,24 @@ describe("isImageOnlyPaste", () => {
       ),
     ).toBe(true);
   });
+
+  it("ProseMirror's own textless copy (figure/hr/toc) stays a structural paste", () => {
+    // In-editor ⌘C of a figure: no text, but the html carries data-pm-slice —
+    // PM must parse it itself; there is no bitmap on NSPasteboard to read.
+    expect(
+      isImageOnlyPaste(
+        cd({
+          "text/html":
+            '<div data-pm-slice="0 0 []"><h-figure><img src="data:image/png;base64,AA"></h-figure></div>',
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isImageOnlyPaste(
+        cd({ "text/html": '<div data-pm-slice="0 0 []"><hr></div>' }),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("stripOpaqueImages", () => {

@@ -296,9 +296,23 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
       useStore.getState().setEditorHandle(null);
       pmViewRef.current = null;
       const dying = view;
+      // An unresolved conflict froze autosave, so the flush below will bail —
+      // and the buffer is about to die with the editor. Rescue the local
+      // edits as a version snapshot (never the live file: the user hasn't
+      // chosen a side of the conflict). Serialize NOW, synchronously, while
+      // the view is still alive.
+      const rescue =
+        conflicted.v && dirty.v && view ? serializeHdoc(view.state.doc) : null;
       // Flush first while the view is still valid, then checkpoint & destroy
       // (same ordering rationale as MarkdownEditor).
       void (async () => {
+        if (rescue !== null) {
+          try {
+            await api.assetSnapshotText(id, rescue);
+          } catch {
+            /* the file may have been deleted mid-session */
+          }
+        }
         try {
           await save();
         } catch {

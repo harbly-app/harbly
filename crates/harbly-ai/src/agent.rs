@@ -34,6 +34,72 @@ const EXIT_GRACE: Duration = Duration::from_secs(5);
 /// Cap on replayed conversation context for fresh (non-resumed) agent runs.
 const HISTORY_CHARS: usize = 6_000;
 
+/// Process-group leaders of live agent children. Exists for the app-exit path:
+/// when the process exits (⌘Q), tokio tasks are never dropped, so per-child
+/// `kill_on_drop` and the in-loop `kill_group` calls cannot fire — without a
+/// process-wide teardown the CLI (its own process group, unsignalled on parent
+/// death) would keep running and writing as an orphan with no timeout.
+#[cfg(unix)]
+static LIVE_PGIDS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<i32>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Latched by [`kill_all_agent_groups`]. The tokio runtime keeps executing for
+/// a beat after the exit sweep (webview teardown, in-flight tasks), and error
+/// recovery paths react to a killed agent by RESPAWNING it (a resumed turn
+/// dying with zero events reruns fresh) — the latch refuses every spawn after
+/// the sweep so no new orphan can slip out during that window.
+static SHUTTING_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Unregisters the child's process group on every exit path (including panics).
+struct PgidGuard {
+    #[cfg(unix)]
+    pgid: Option<i32>,
+}
+
+impl PgidGuard {
+    fn register(child: &tokio::process::Child) -> Self {
+        #[cfg(unix)]
+        {
+            let pgid = child.id().map(|p| p as i32);
+            if let Some(p) = pgid {
+                LIVE_PGIDS.lock().unwrap().insert(p);
+            }
+            PgidGuard { pgid }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = child;
+            PgidGuard {}
+        }
+    }
+}
+
+impl Drop for PgidGuard {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(p) = self.pgid {
+            LIVE_PGIDS.lock().unwrap().remove(&p);
+        }
+    }
+}
+
+/// SIGKILL every live agent process group and refuse all further spawns.
+/// Called from the app's exit hook — the only teardown that still runs on ⌘Q
+/// (see [`LIVE_PGIDS`]).
+pub fn kill_all_agent_groups() {
+    SHUTTING_DOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+    #[cfg(unix)]
+    {
+        let pgids: Vec<i32> = LIVE_PGIDS.lock().unwrap().iter().copied().collect();
+        for pgid in pgids {
+            // SAFETY: a bare kill(2); an already-dead group just yields ESRCH.
+            unsafe {
+                libc::kill(-pgid, libc::SIGKILL);
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
@@ -358,9 +424,20 @@ async fn run_agent_process(
     // not just the CLI itself (agent CLIs routinely fork helpers).
     #[cfg(unix)]
     cmd.process_group(0);
+    if SHUTTING_DOWN.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(AiError::Cancelled);
+    }
     let mut child = cmd
         .spawn()
         .map_err(|e| AiError::Agent(format!("spawn failed: {e}")))?;
+    let _pgid_guard = PgidGuard::register(&child);
+    // Close the latch race: a spawn concurrent with the exit sweep may have
+    // registered after the sweep collected its pgid list — re-check and
+    // self-destruct so the child never outlives the app.
+    if SHUTTING_DOWN.load(std::sync::atomic::Ordering::SeqCst) {
+        kill_group(&mut child);
+        return Err(AiError::Cancelled);
+    }
 
     // Drain stderr concurrently so a chatty CLI can't deadlock on a full pipe;
     // keep the tail for error reporting.

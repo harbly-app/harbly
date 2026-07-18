@@ -514,7 +514,37 @@ async fn stream_step(
     };
     let status = resp.status();
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
+        // The error-body read must honor Stop and the turn deadline like every
+        // other await in this function: the client has only a CONNECT timeout,
+        // so a proxy/middlebox that sends the status head and then holds the
+        // connection open would hang this read forever — wedging the session
+        // "busy" (Stop dead, sends rejected, delete blocked) until app restart.
+        // Size-capped as well: only the (small) provider error message is ever
+        // extracted, so a hostile endpoint streaming garbage must not be
+        // buffered without bound until the deadline.
+        const ERROR_BODY_CAP: usize = 64 * 1024;
+        let mut buf: Vec<u8> = Vec::new();
+        let mut body_stream = resp.bytes_stream();
+        loop {
+            if cancel.is_cancelled() {
+                return Err(AiError::Cancelled);
+            }
+            if Instant::now() > deadline {
+                return Err(AiError::Timeout);
+            }
+            match tokio::time::timeout(CANCEL_TICK, body_stream.next()).await {
+                Err(_) => continue,
+                Ok(None) => break,
+                Ok(Some(Err(_))) => break, // partial body is fine for an error message
+                Ok(Some(Ok(chunk))) => {
+                    buf.extend_from_slice(&chunk[..chunk.len().min(ERROR_BODY_CAP - buf.len())]);
+                    if buf.len() >= ERROR_BODY_CAP {
+                        break;
+                    }
+                }
+            }
+        }
+        let body = String::from_utf8_lossy(&buf);
         return Err(AiError::Provider(provider_error(status.as_u16(), &body)));
     }
 

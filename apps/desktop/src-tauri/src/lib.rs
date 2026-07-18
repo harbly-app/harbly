@@ -36,6 +36,7 @@ pub fn run() {
             commands::asset_read_text,
             commands::asset_write,
             commands::asset_checkpoint,
+            commands::asset_snapshot_text,
             commands::asset_new_markdown,
             commands::asset_new_hdoc,
             commands::export_hdoc_html,
@@ -101,6 +102,17 @@ pub fn run() {
             commands::try_autoload(app.handle().clone());
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("Harbly failed to start");
+        .build(tauri::generate_context!())
+        .expect("Harbly failed to start")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // ⌘Q teardown. Tokio tasks are never dropped on process exit, so
+                // the per-run kill paths (kill_on_drop, cancel checks) cannot
+                // fire — without this hook a mid-turn claude/codex CLI (its own
+                // process group, unsignalled on parent death) survives as an
+                // orphan, keeps writing assets through MCP with no timeout, and
+                // keeps burning the user's API quota.
+                harbly_ai::kill_all_agent_groups();
+            }
+        });
 }
