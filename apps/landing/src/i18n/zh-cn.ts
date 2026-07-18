@@ -6,7 +6,7 @@ const zhCn: Dict = {
   htmlLang: "zh-CN",
   title: "Harbly — 本地优先的 HTML 知识库",
   description:
-    "把知识存成永远打得开的网页。Harbly 是本地优先的单文件 HTML 知识库：收藏网页、撰写页面文档与 Markdown、沙箱预览、全文搜索，导出一个文件即可分享。开源 AGPL-3.0。",
+    "本地优先的单文件 HTML 知识库：收藏网页、撰写笔记、全文搜索，导出一个文件即可分享。免费开源，数据永远在你自己的磁盘上。",
   nav: {
     features: "特性",
     how: "工作方式",

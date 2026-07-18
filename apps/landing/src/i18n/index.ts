@@ -44,36 +44,17 @@ export interface Dict {
   footer: { tag: string; meta: string };
 }
 
-/** Per-locale webfont: Manrope everywhere, plus the matching Noto CJK family. */
-export const FONTS: Record<Locale, { href: string; stack: string }> = {
-  en: {
-    href: "https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap",
-    stack: "Manrope, system-ui, -apple-system, sans-serif",
-  },
-  es: {
-    href: "https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap",
-    stack: "Manrope, system-ui, -apple-system, sans-serif",
-  },
-  "zh-cn": {
-    href: "https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Noto+Sans+SC:wght@400;500;700;900&display=swap",
-    stack:
-      'Manrope, "Noto Sans SC", system-ui, -apple-system, "PingFang SC", sans-serif',
-  },
-  "zh-tw": {
-    href: "https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Noto+Sans+TC:wght@400;500;700;900&display=swap",
-    stack:
-      'Manrope, "Noto Sans TC", system-ui, -apple-system, "PingFang TC", sans-serif',
-  },
-  ja: {
-    href: "https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Noto+Sans+JP:wght@400;500;700;900&display=swap",
-    stack:
-      'Manrope, "Noto Sans JP", system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif',
-  },
-  ko: {
-    href: "https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700;900&display=swap",
-    stack:
-      'Manrope, "Noto Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif',
-  },
+/** Per-locale font stacks. Manrope is self-hosted (latin only); CJK falls
+ * through to first-class system fonts — no CJK webfont payload. */
+export const FONT_STACKS: Record<Locale, string> = {
+  en: "Manrope, system-ui, -apple-system, sans-serif",
+  es: "Manrope, system-ui, -apple-system, sans-serif",
+  "zh-cn":
+    'Manrope, system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
+  "zh-tw":
+    'Manrope, system-ui, -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif',
+  ja: 'Manrope, system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif',
+  ko: 'Manrope, system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
 };
 
 /** Site path for a locale ("/" for the default, "/<locale>/" otherwise). */

@@ -6,7 +6,7 @@ const es: Dict = {
   htmlLang: "es",
   title: "Harbly — Base de conocimiento local-first en HTML",
   description:
-    "Guarda tu conocimiento en páginas web que siempre se podrán abrir. Harbly es una base de conocimiento local-first construida sobre HTML de archivo único: captura páginas web, escribe documentos de página y Markdown, previsualiza en un sandbox, busca a texto completo y comparte enviando un solo archivo. Código abierto, AGPL-3.0.",
+    "Base de conocimiento local-first en HTML de un solo archivo. Guarda páginas, escribe notas, busca en todo y comparte con un archivo. Gratis y open source.",
   nav: {
     features: "Características",
     how: "Cómo funciona",

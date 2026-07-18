@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://harbly.app/sitemap-index.xml

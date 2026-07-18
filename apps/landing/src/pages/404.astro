@@ -1,0 +1,74 @@
+---
+// Single 404 for all locales: static hosts serve /404.html for any miss.
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>404 — Harbly</title>
+    <meta name="robots" content="noindex" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <main>
+      <span class="mark">&lt;/&gt;</span>
+      <h1>404</h1>
+      <p>This page doesn't exist — but your files always will.</p>
+      <a href="/">Back to harbly.app</a>
+    </main>
+  </body>
+</html>
+
+<style>
+  * {
+    box-sizing: border-box;
+    margin: 0;
+  }
+  body {
+    font-family:
+      Manrope,
+      system-ui,
+      -apple-system,
+      sans-serif;
+    background: #fdfcfd;
+    color: #1a1523;
+    display: grid;
+    place-items: center;
+    min-height: 100vh;
+    text-align: center;
+  }
+  .mark {
+    display: inline-grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: #6e56cf;
+    color: #fff;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 15px;
+    font-weight: 800;
+  }
+  h1 {
+    font-size: 56px;
+    font-weight: 900;
+    margin-top: 18px;
+  }
+  p {
+    color: #6f6e77;
+    margin-top: 8px;
+  }
+  a {
+    display: inline-block;
+    margin-top: 22px;
+    color: #6e56cf;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  a:hover {
+    text-decoration: underline;
+  }
+</style>

@@ -1,9 +1,15 @@
 ---
 // The whole landing page, parameterized by locale. Fully static except for
-// two tiny inline scripts: first-visit language detection on "/" and
+// two tiny inline scripts: a dismissible language suggestion on "/" and
 // persisting an explicit language choice (mirrors the app's follow-system
 // behavior with a manual override).
-import { DICTS, FONTS, LOCALES, localePath, type Locale } from "../i18n/index";
+import {
+  DICTS,
+  FONT_STACKS,
+  LOCALES,
+  localePath,
+  type Locale,
+} from "../i18n/index";
 
 interface Props {
   locale: Locale;
@@ -11,8 +17,44 @@ interface Props {
 
 const { locale } = Astro.props;
 const t = DICTS[locale];
-const font = FONTS[locale];
+const fontStack = FONT_STACKS[locale];
 const site = "https://harbly.app";
+const github = "https://github.com/harbly-app/harbly";
+
+const OG_LOCALES: Record<Locale, string> = {
+  en: "en_US",
+  "zh-cn": "zh_CN",
+  "zh-tw": "zh_TW",
+  ja: "ja_JP",
+  ko: "ko_KR",
+  es: "es_ES",
+};
+
+const jsonLd = [
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "Harbly",
+    operatingSystem: "macOS",
+    applicationCategory: "ProductivityApplication",
+    description: t.description,
+    inLanguage: t.htmlLang,
+    url: site + localePath(locale),
+    image: site + "/og.png",
+    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    license: "https://www.gnu.org/licenses/agpl-3.0.html",
+    downloadUrl: github,
+    author: { "@type": "Organization", name: "Harbly", url: site },
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: "Harbly",
+    url: site,
+    logo: site + "/icon-192.png",
+    sameAs: [github],
+  },
+];
 
 const mockGradients = [
   "linear-gradient(135deg,#EDE9FE,#C4B5FD)",
@@ -36,12 +78,30 @@ const mockCards = t.mock.cards.map((c, i) => ({
     <title>{t.title}</title>
     <meta name="description" content={t.description} />
     <meta name="theme-color" content="#6E56CF" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Harbly" />
     <meta property="og:title" content={t.title} />
     <meta property="og:description" content={t.description} />
     <meta property="og:url" content={site + localePath(locale)} />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:image" content={site + "/og.png"} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Harbly — local-first HTML knowledge base"
+    />
+    <meta property="og:locale" content={OG_LOCALES[locale]} />
+    {
+      LOCALES.filter((l) => l !== locale).map((l) => (
+        <meta property="og:locale:alternate" content={OG_LOCALES[l]} />
+      ))
+    }
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content={site + "/og.png"} />
     <link rel="canonical" href={site + localePath(locale)} />
     {
       LOCALES.map((l) => (
@@ -53,42 +113,85 @@ const mockCards = t.mock.cards.map((c, i) => ({
       ))
     }
     <link rel="alternate" hreflang="x-default" href={site + "/"} />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href={font.href} rel="stylesheet" />
+    <link
+      rel="preload"
+      href="/fonts/manrope-var.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
     <script is:inline>
-      // First visit on "/": follow the browser language, like the app follows
-      // the system. An explicit pick in the switcher (data-lang) wins forever.
+      // Language handling, following Google's multilingual-site guidance:
+      // never auto-redirect off the browser language — hreflang handles SERP
+      // routing, and first visits on "/" get a dismissible suggestion banner
+      // instead. Only an explicit pick in the switcher (data-lang, persisted)
+      // redirects on later visits to "/".
       (function () {
         var KEY = "harbly.landing.lang";
+        var DISMISS = "harbly.landing.langBannerDismissed";
         document.addEventListener("click", function (e) {
           var a =
             e.target && e.target.closest && e.target.closest("[data-lang]");
-          if (a) localStorage.setItem(KEY, a.getAttribute("data-lang"));
+          if (a)
+            try {
+              localStorage.setItem(KEY, a.getAttribute("data-lang"));
+            } catch (_) {}
         });
         if (location.pathname !== "/") return;
         var saved = null;
+        var dismissed = null;
         try {
           saved = localStorage.getItem(KEY);
+          dismissed = localStorage.getItem(DISMISS);
         } catch (_) {}
         var locales = ["en", "zh-cn", "zh-tw", "ja", "ko", "es"];
-        var pick = null;
         if (saved && locales.indexOf(saved) !== -1) {
-          pick = saved;
-        } else if (!saved) {
-          var nav = (navigator.language || "").toLowerCase();
-          if (nav.indexOf("zh") === 0)
-            pick = /tw|hk|mo|hant/.test(nav) ? "zh-tw" : "zh-cn";
-          else if (nav.indexOf("ja") === 0) pick = "ja";
-          else if (nav.indexOf("ko") === 0) pick = "ko";
-          else if (nav.indexOf("es") === 0) pick = "es";
+          if (saved !== "en") location.replace("/" + saved + "/");
+          return;
         }
-        if (pick && pick !== "en") location.replace("/" + pick + "/");
+        if (dismissed) return;
+        var nav = (navigator.language || "").toLowerCase();
+        var pick = null;
+        if (nav.indexOf("zh") === 0)
+          pick = /tw|hk|mo|hant/.test(nav) ? "zh-tw" : "zh-cn";
+        else if (nav.indexOf("ja") === 0) pick = "ja";
+        else if (nav.indexOf("ko") === 0) pick = "ko";
+        else if (nav.indexOf("es") === 0) pick = "es";
+        if (!pick) return;
+        var TEXT = {
+          "zh-cn": ["此页面有简体中文版", "前往"],
+          "zh-tw": ["此頁面有繁體中文版", "前往"],
+          ja: ["このページには日本語版があります", "開く"],
+          ko: ["이 페이지는 한국어로도 볼 수 있습니다", "이동"],
+          es: ["Esta página está disponible en español", "Ver"],
+        }[pick];
+        document.addEventListener("DOMContentLoaded", function () {
+          var el = document.createElement("div");
+          el.className = "lang-banner";
+          var span = document.createElement("span");
+          span.textContent = TEXT[0];
+          var go = document.createElement("a");
+          go.href = "/" + pick + "/";
+          go.setAttribute("data-lang", pick);
+          go.textContent = TEXT[1];
+          var x = document.createElement("button");
+          x.setAttribute("aria-label", "Dismiss");
+          x.textContent = "✕";
+          x.addEventListener("click", function () {
+            try {
+              localStorage.setItem(DISMISS, "1");
+            } catch (_) {}
+            el.remove();
+          });
+          el.append(span, go, x);
+          document.body.prepend(el);
+        });
       })();
     </script>
   </head>
 
-  <body style={`font-family:${font.stack}`}>
+  <body style={`font-family:${fontStack}`}>
     <header class="nav">
       <div class="nav-inner container">
         <a class="brand" href="#top">
@@ -248,6 +351,20 @@ const mockCards = t.mock.cards.map((c, i) => ({
 </html>
 
 <style is:global>
+  /* Self-hosted variable Manrope, latin subset only — CJK text falls through
+   * to the system stacks in FONT_STACKS. */
+  @font-face {
+    font-family: Manrope;
+    font-style: normal;
+    font-weight: 200 800;
+    font-display: swap;
+    src: url("/fonts/manrope-var.woff2") format("woff2");
+    unicode-range:
+      U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+      U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+      U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+
   :root {
     --primary: #6e56cf;
     --primary-light: #8570dc;
@@ -331,6 +448,35 @@ const mockCards = t.mock.cards.map((c, i) => ({
     padding: 2px 7px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.22);
+  }
+
+  /* ---------- Language suggestion banner ---------- */
+  .lang-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 9px 14px;
+    font-size: 13px;
+    background: rgba(110, 86, 207, 0.08);
+    border-bottom: 1px solid var(--line);
+    color: var(--ink);
+  }
+  .lang-banner a {
+    color: var(--primary);
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .lang-banner a:hover {
+    text-decoration: underline;
+  }
+  .lang-banner button {
+    border: 0;
+    background: none;
+    color: var(--sub);
+    font-size: 13px;
+    cursor: pointer;
+    padding: 2px 6px;
   }
 
   /* ---------- Navigation ---------- */
