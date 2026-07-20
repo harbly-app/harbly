@@ -1,12 +1,14 @@
 import { Crepe } from "@milkdown/crepe";
 import { redoCommand, undoCommand } from "@milkdown/kit/plugin/history";
-import { callCommand } from "@milkdown/kit/utils";
+import { $prose, callCommand } from "@milkdown/kit/utils";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 import { RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { imageToDataUrl } from "../hdoc/image";
 import { api, relAssetUrl } from "../lib/api";
 import { makeT } from "../lib/i18n";
+import { mdNativeImagePastePlugin, stripDoomedImageRefs } from "../lib/mdpaste";
 import { useStore } from "../lib/store";
 import type { AssetMeta } from "../lib/types";
 
@@ -80,6 +82,11 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
       [Crepe.Feature.ImageBlock]: {
         proxyDomURL: (url: string) =>
           isRelativeUrl(url) ? relAssetUrl(id, url) : url,
+        // Without this, Crepe stores pasted/dropped images as
+        // URL.createObjectURL blob: URLs — they render this session and are
+        // gone forever after a reload. Embed as data: URLs (with downscaling),
+        // same pipeline as the hdoc editor.
+        onUpload: imageToDataUrl,
       },
     };
 
@@ -91,6 +98,9 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
         features: { [Crepe.Feature.Latex]: false },
         featureConfigs,
       });
+      // Registered after Crepe's clipboard/upload plugins, so it only sees the
+      // pastes they decline: raw macOS clipboard bitmaps invisible to JS.
+      c.editor.use($prose(() => mdNativeImagePastePlugin()));
       c.on((listener) =>
         listener.markdownUpdated((_ctx, markdown) => {
           if (!ready.v || markdown === lastSavedBody.v) return;
@@ -112,7 +122,7 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
       // now would overwrite the other edit before the user decides. Only the
       // explicit "keep mine" path (force) is allowed through.
       if (conflicted.v && !force) return;
-      const body = crepe.getMarkdown();
+      const body = stripDoomedImageRefs(crepe.getMarkdown());
       if (!force && body === lastSavedBody.v) {
         dirty.v = false;
         return;
