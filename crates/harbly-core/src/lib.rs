@@ -112,9 +112,12 @@ impl Library {
         self.root.join(rel)
     }
 
-    /// jieba-segmented text joined with spaces, used on both the FTS5 unicode61 indexing and query sides
+    /// jieba-segmented text joined with spaces, used on both the FTS5 unicode61 indexing and query sides.
+    /// The snippet-highlight sentinels (U+0001/U+0002, see ops.rs) are stripped
+    /// so indexed text can never fake a <mark> boundary in search results.
     pub(crate) fn seg(&self, text: &str) -> String {
-        self.jieba.cut_for_search(text, true).join(" ")
+        let clean = text.replace(['\u{1}', '\u{2}'], " ");
+        self.jieba.cut_for_search(&clean, true).join(" ")
     }
 }
 

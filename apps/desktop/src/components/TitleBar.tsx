@@ -11,13 +11,15 @@ import {
   Sparkles,
   SquarePen,
   Star,
+  Tag as TagIcon,
 } from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import { useStore } from "../lib/store";
-import { INBOX, isHdoc, isMd } from "../lib/types";
+import { INBOX, isHdoc, isMd, stemName } from "../lib/types";
 import { windowDrag } from "../lib/drag";
+import RenameInput from "./RenameInput";
 
 export default function TitleBar() {
   const setPalette = useStore((s) => s.setPalette);
@@ -34,6 +36,15 @@ export default function TitleBar() {
   const toggleAi = useStore((s) => s.toggleAi);
   const t = makeT(useStore((s) => s.lang));
   const [scanning, setScanning] = useState(false);
+  // Track WHICH file is being renamed: a plain boolean would survive an
+  // arrow-key file switch and pop the input open on the next file.
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  // Position of the open file within the current view (for the n / N hint)
+  const viewPos = useStore((s) =>
+    s.viewerAsset ? s.assets.findIndex((x) => x.id === s.viewerAsset?.id) : -1,
+  );
+  const viewTotal = useStore((s) => s.assets.length);
+  const saveState = useStore((s) => s.saveState);
 
   const rescan = async () => {
     if (scanning) return;
@@ -106,9 +117,47 @@ export default function TitleBar() {
                 : viewer.folder || t("libraryRoot")}{" "}
               /
             </button>
-            <span className="truncate text-[13.5px] font-extrabold">
-              {viewer.fileName}
-            </span>
+            {renamingId === viewer.id ? (
+              <RenameInput
+                initial={stemName(viewer.fileName)}
+                className="h-6 w-full min-w-0 rounded border border-primary bg-card px-1.5 text-[13px] font-bold outline-none"
+                onCommit={(v) => {
+                  setRenamingId(null);
+                  void useStore.getState().doRename(viewer.id, v);
+                }}
+                onCancel={() => setRenamingId(null)}
+              />
+            ) : (
+              <button
+                onClick={() => setRenamingId(viewer.id)}
+                className="min-w-0 truncate text-left text-[13.5px] font-extrabold transition hover:text-primary"
+                title={t("rename")}
+              >
+                {viewer.fileName}
+              </button>
+            )}
+            {viewPos >= 0 && viewTotal > 1 && (
+              <span className="shrink-0 text-[11px] text-sub tabular-nums">
+                {viewPos + 1} / {viewTotal}
+              </span>
+            )}
+            {saveState && (
+              <span
+                className={`flex shrink-0 items-center gap-1 text-[11px] ${
+                  saveState === "saved" ? "text-sub" : "text-primary"
+                }`}
+                title="⌘S"
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    saveState === "saved" ? "bg-ok" : "bg-primary"
+                  }`}
+                />
+                {saveState === "saved"
+                  ? t("saveStateSaved")
+                  : t("saveStateEditing")}
+              </span>
+            )}
           </div>
 
           <div className="flex-1" />
@@ -139,6 +188,20 @@ export default function TitleBar() {
             }`}
           >
             <Star className={`h-4 w-4 ${viewer.favorite ? "fill-warn" : ""}`} />
+          </button>
+
+          <button
+            onClick={() =>
+              useStore.getState().setModal({ kind: "tags", assets: [viewer] })
+            }
+            title={t("tagsMenu")}
+            className={`relative z-[1] grid h-8 w-8 place-items-center rounded-ctl transition ${
+              viewer.tags.length > 0
+                ? "text-primary hover:bg-side"
+                : "text-sub hover:bg-side hover:text-ink"
+            }`}
+          >
+            <TagIcon className="h-4 w-4" />
           </button>
 
           <button

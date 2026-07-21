@@ -105,6 +105,9 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
         listener.markdownUpdated((_ctx, markdown) => {
           if (!ready.v || markdown === lastSavedBody.v) return;
           dirty.v = true;
+          // gone(): a late async mutation (image upload resolving) must not
+          // resurrect the badge after unmount cleanup reset it to null.
+          if (!gone()) useStore.getState().setSaveState("editing");
           scheduleSave();
         }),
       );
@@ -125,6 +128,10 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
       const body = stripDoomedImageRefs(crepe.getMarkdown());
       if (!force && body === lastSavedBody.v) {
         dirty.v = false;
+        // The unmount flush also lands here — after cleanup already reset the
+        // global saveState to null, it must not be resurrected as "saved"
+        // (it would badge unrelated files, or mask a newer editor's state).
+        if (!gone()) useStore.getState().setSaveState("saved");
         return;
       }
       try {
@@ -132,6 +139,7 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
         lastSavedBody.v = body;
         lastSavedHash.v = meta.currentHash;
         dirty.v = false;
+        if (!gone()) useStore.getState().setSaveState("saved");
         // Reflect the new hash on the open asset so our own write is recognized
         // as an echo (not an external change) and the title stays current.
         useStore.setState((s) =>
@@ -185,6 +193,7 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
       conflicted.v = false;
       setConflict(false);
       ready.v = true;
+      useStore.getState().setSaveState("saved");
     };
 
     const undo = () => crepe?.editor.action(callCommand(undoCommand.key));
@@ -242,6 +251,7 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
       lastSavedBody.v = crepe.getMarkdown();
       ready.v = true;
       useStore.getState().setEditorHandle({ undo, redo, flush });
+      useStore.getState().setSaveState("saved");
     })();
 
     return () => {
@@ -250,6 +260,7 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
       document.removeEventListener("visibilitychange", onVisibility);
       if (saveTimer) clearTimeout(saveTimer);
       useStore.getState().setEditorHandle(null);
+      useStore.getState().setSaveState(null);
       const dying = crepe;
       // An unresolved conflict froze autosave, so the flush below will bail —
       // and the buffer is about to die with the editor. Rescue the local

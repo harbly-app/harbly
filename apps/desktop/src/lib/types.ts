@@ -62,9 +62,13 @@ export interface ImportResult {
   dupOf: string[];
   /** Relative paths actually written to disk */
   imported: string[];
+  /** First per-file import error; the rest of the batch still went through */
+  failed: string | null;
+  /** Files that hit a write/index error (separate from unsupported `skipped`) */
+  failedCount: number;
 }
 
-export type SortKey = "recent" | "name" | "modified";
+export type SortKey = "recent" | "name" | "modified" | "size";
 
 export interface VersionInfo {
   ver: number;

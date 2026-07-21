@@ -57,10 +57,10 @@ fn scan_index_search_chinese() {
     assert_eq!(proj.children[0].name, "星链SaaS");
 
     // Listing: empty string = "All Assets", the whole library recursively; concrete folder = direct files only
-    let all = lib.list_assets("", SortKey::Recent).unwrap();
+    let all = lib.list_assets("", SortKey::Recent, false).unwrap();
     assert_eq!(all.len(), 2);
     let in_folder = lib
-        .list_assets("客户项目/星链SaaS", SortKey::Recent)
+        .list_assets("客户项目/星链SaaS", SortKey::Recent, false)
         .unwrap();
     assert_eq!(in_folder.len(), 1);
     assert_eq!(in_folder[0].file_name, "季度营收仪表盘.html");
@@ -108,7 +108,7 @@ fn version_chain_external_edit_and_restore() {
     fs::write(&f, html("Page", "第一版内容")).unwrap();
     lib.scan(|_| {}).unwrap();
 
-    let assets = lib.list_assets("", SortKey::Recent).unwrap();
+    let assets = lib.list_assets("", SortKey::Recent, false).unwrap();
     let id = assets[0].id.clone();
     assert_eq!(assets[0].ver_count, 1);
 
@@ -141,7 +141,7 @@ fn folder_rename_and_duplicate() {
     fs::write(root.join("项目/子目录/内页.html"), html("内页", "乙")).unwrap();
     lib.scan(|_| {}).unwrap();
 
-    let before = lib.list_assets("项目", SortKey::Name).unwrap();
+    let before = lib.list_assets("项目", SortKey::Name, true).unwrap();
     let id = before[0].id.clone();
 
     // Rename a folder: paths rebound, asset ids unchanged, nothing deleted
@@ -173,7 +173,7 @@ fn tags_and_export() {
     fs::write(root.join("目录/乙.html"), html("乙", "内容乙")).unwrap();
     lib.scan(|_| {}).unwrap();
 
-    let assets = lib.list_assets("目录", SortKey::Name).unwrap();
+    let assets = lib.list_assets("目录", SortKey::Name, true).unwrap();
     assert!(assets[0].tags.is_empty());
 
     // Tag → tags come back in metadata → tag list → fetch by tag
@@ -185,7 +185,12 @@ fn tags_and_export() {
     let tags = lib.all_tags().unwrap();
     assert_eq!(tags[0].name, "重要");
     assert_eq!(tags[0].count, 2);
-    assert_eq!(lib.assets_by_tag("仪表盘").unwrap().len(), 1);
+    assert_eq!(
+        lib.assets_by_tag("仪表盘", harbly_core::SortKey::Recent, false)
+            .unwrap()
+            .len(),
+        1
+    );
 
     // Search hits on a tag word
     let hits = lib.search("仪表盘").unwrap();
@@ -205,14 +210,18 @@ fn favorites_star_persist_and_rescan() {
     fs::write(root.join("a.html"), html("A", "内容甲")).unwrap();
     fs::write(root.join("b.html"), html("B", "内容乙")).unwrap();
     lib.scan(|_| {}).unwrap();
-    let assets = lib.list_assets("", harbly_core::SortKey::Name).unwrap();
+    let assets = lib
+        .list_assets("", harbly_core::SortKey::Name, true)
+        .unwrap();
     let (a, b) = (&assets[0], &assets[1]);
     assert!(!a.favorite);
 
     // Star → metadata, favorites view, count, and the on-file xattr all agree
     lib.set_favorite(&a.id, true).unwrap();
     assert!(lib.asset(&a.id).unwrap().favorite);
-    let favs = lib.favorite_assets().unwrap();
+    let favs = lib
+        .favorite_assets(harbly_core::SortKey::Recent, false)
+        .unwrap();
     assert_eq!(favs.len(), 1);
     assert_eq!(favs[0].id, a.id);
     assert_eq!(lib.favorite_count().unwrap(), 1);
@@ -249,7 +258,7 @@ fn move_rename_inbox() {
     assert_eq!(lib.inbox_count().unwrap(), 1);
 
     // Archiving = moving out of the inbox
-    let inbox = lib.list_assets("_inbox", SortKey::Recent).unwrap();
+    let inbox = lib.list_assets("_inbox", SortKey::Recent, false).unwrap();
     lib.create_folder("", "项目A").unwrap();
     let moved = lib.move_asset(&inbox[0].id, "项目A").unwrap();
     assert_eq!(moved.folder, "项目A");
@@ -257,7 +266,7 @@ fn move_rename_inbox() {
     assert_eq!(lib.inbox_count().unwrap(), 0);
 
     // Rename keeps the extension
-    let all = lib.list_assets("", SortKey::Recent).unwrap();
+    let all = lib.list_assets("", SortKey::Recent, false).unwrap();
     let x = all.iter().find(|a| a.file_name == "x.html").unwrap();
     let renamed = lib.rename_asset(&x.id, "改名").unwrap();
     assert_eq!(renamed.file_name, "改名.html");
@@ -272,7 +281,7 @@ fn move_rename_inbox() {
     let sum = lib.scan(|_| {}).unwrap();
     assert_eq!(sum.moved, 1);
     assert_eq!(sum.removed, 0);
-    let a = lib.list_assets("项目A", SortKey::Name).unwrap();
+    let a = lib.list_assets("项目A", SortKey::Name, true).unwrap();
     assert_eq!(a.len(), 2);
 }
 
@@ -302,7 +311,7 @@ fn md_scan_title_precedence_and_chinese_fts() {
     let sum = lib.scan(|_| {}).unwrap();
     assert_eq!(sum.added, 3);
 
-    let all = lib.list_assets("", SortKey::Name).unwrap();
+    let all = lib.list_assets("", SortKey::Name, true).unwrap();
     let title_of = |name: &str| {
         all.iter()
             .find(|a| a.file_name == name)
@@ -327,7 +336,7 @@ fn md_rename_preserves_extension() {
     fs::write(lib.root().join("page.html"), html("Page", "content")).unwrap();
     lib.scan(|_| {}).unwrap();
 
-    let all = lib.list_assets("", SortKey::Name).unwrap();
+    let all = lib.list_assets("", SortKey::Name, true).unwrap();
     let note = all.iter().find(|a| a.file_name == "note.md").unwrap();
     let page = all.iter().find(|a| a.file_name == "page.html").unwrap();
 
@@ -353,7 +362,9 @@ fn md_version_chain_uses_md_extension() {
     let f = lib.root().join("doc.md");
     fs::write(&f, md(None, "# 标题\n\n第一版")).unwrap();
     lib.scan(|_| {}).unwrap();
-    let id = lib.list_assets("", SortKey::Recent).unwrap()[0].id.clone();
+    let id = lib.list_assets("", SortKey::Recent, false).unwrap()[0]
+        .id
+        .clone();
 
     fs::write(
         &f,
@@ -421,14 +432,17 @@ fn forget_then_resurrect_preserves_id_and_history() {
     let stash = tmp.path().join("stash.md");
     fs::rename(&abs, &stash).unwrap();
     lib.forget_asset(&a.id).unwrap();
-    assert!(lib.list_assets("", SortKey::Recent).unwrap().is_empty());
+    assert!(lib
+        .list_assets("", SortKey::Recent, false)
+        .unwrap()
+        .is_empty());
     // Version rows deliberately survive the forget (the undo may reconnect them)
     assert_eq!(lib.list_versions(&a.id).unwrap().len(), 2);
 
     // Undo: the file comes back; resurrect reconnects the SAME id + history
     fs::rename(&stash, &abs).unwrap();
     lib.resurrect_asset(&a, "笔记.md").unwrap();
-    let assets = lib.list_assets("", SortKey::Recent).unwrap();
+    let assets = lib.list_assets("", SortKey::Recent, false).unwrap();
     assert_eq!(assets.len(), 1);
     assert_eq!(assets[0].id, a.id);
     assert_eq!(assets[0].ver_count, 2);
@@ -437,7 +451,10 @@ fn forget_then_resurrect_preserves_id_and_history() {
     // A follow-up scan sees a registered, unchanged path — nothing re-registers
     let sum = lib.scan(|_| {}).unwrap();
     assert!(!sum.changed());
-    assert_eq!(lib.list_assets("", SortKey::Recent).unwrap().len(), 1);
+    assert_eq!(
+        lib.list_assets("", SortKey::Recent, false).unwrap().len(),
+        1
+    );
 }
 
 #[test]
@@ -516,7 +533,7 @@ fn hdoc_scan_title_attrs_and_fts() {
     let sum = lib.scan(|_| {}).unwrap();
     assert_eq!(sum.added, 2);
 
-    let all = lib.list_assets("", SortKey::Name).unwrap();
+    let all = lib.list_assets("", SortKey::Name, true).unwrap();
     let title_of = |name: &str| {
         all.iter()
             .find(|a| a.file_name == name)
@@ -541,7 +558,10 @@ fn hdoc_rename_preserves_extension() {
     let (_tmp, lib) = setup();
     fs::write(lib.root().join("page.hdoc"), hdoc("页", "")).unwrap();
     lib.scan(|_| {}).unwrap();
-    let a = lib.list_assets("", SortKey::Recent).unwrap().remove(0);
+    let a = lib
+        .list_assets("", SortKey::Recent, false)
+        .unwrap()
+        .remove(0);
 
     let r = lib.rename_asset(&a.id, "改名").unwrap();
     assert_eq!(r.file_name, "改名.hdoc");
@@ -619,7 +639,9 @@ fn finder_tags_xattr_interop() {
     let abs = lib.root().join("笔记.html");
     fs::write(&abs, html("笔记", "灵感内容")).unwrap();
     lib.scan(|_| {}).unwrap();
-    let id = lib.list_assets("", SortKey::Name).unwrap()[0].id.clone();
+    let id = lib.list_assets("", SortKey::Name, true).unwrap()[0]
+        .id
+        .clone();
 
     // Set in-app → lands in the file xattr (visible to Finder)
     lib.set_tags(&id, &["重要".into(), "灵感".into()]).unwrap();

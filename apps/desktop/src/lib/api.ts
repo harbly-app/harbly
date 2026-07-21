@@ -26,8 +26,8 @@ export const api = {
   scanLibrary: () => invoke<ScanSummary>("scan_library"),
   rescan: () => invoke<ScanSummary>("rescan"),
   dirTree: () => invoke<TreeNode>("dir_tree"),
-  listAssets: (folder: string, sort: SortKey) =>
-    invoke<AssetMeta[]>("list_assets", { folder, sort }),
+  listAssets: (folder: string, sort: SortKey, asc: boolean) =>
+    invoke<AssetMeta[]>("list_assets", { folder, sort, asc }),
   assetGet: (id: string) => invoke<AssetMeta>("asset_get", { id }),
   inboxCount: () => invoke<number>("inbox_count"),
   // Markdown editing
@@ -93,10 +93,12 @@ export const api = {
   setTags: (id: string, tags: string[]) =>
     invoke<null>("set_tags", { id, tags }),
   allTags: () => invoke<TagInfo[]>("all_tags"),
-  assetsByTag: (tag: string) => invoke<AssetMeta[]>("assets_by_tag", { tag }),
+  assetsByTag: (tag: string, sort: SortKey, asc: boolean) =>
+    invoke<AssetMeta[]>("assets_by_tag", { tag, sort, asc }),
   setFavorite: (id: string, favorite: boolean) =>
     invoke<null>("set_favorite", { id, favorite }),
-  favoriteAssets: () => invoke<AssetMeta[]>("favorite_assets"),
+  favoriteAssets: (sort: SortKey, asc: boolean) =>
+    invoke<AssetMeta[]>("favorite_assets", { sort, asc }),
   favoriteCount: () => invoke<number>("favorite_count"),
   allowOnce: (id: string) => invoke<string>("asset_allow_once", { id }),
   exportAsset: (id: string) => invoke<string | null>("export_asset", { id }),

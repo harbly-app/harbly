@@ -1,6 +1,13 @@
 import { create } from "zustand";
 import { api } from "./api";
-import { initialLang, isLang, localizeError, setCurrentLang, tr } from "./i18n";
+import {
+  initialLang,
+  isLang,
+  localizeAiError,
+  localizeError,
+  setCurrentLang,
+  tr,
+} from "./i18n";
 import type { Lang } from "./i18n";
 import { applyThemePref, initialThemePref } from "./theme";
 import type { ThemePref } from "./theme";
@@ -23,7 +30,7 @@ import {
 export type Modal =
   | { kind: "move"; ids: string[]; label: string; fromFolder: string | null }
   | { kind: "newFolder"; parent: string }
-  | { kind: "tags"; asset: AssetMeta }
+  | { kind: "tags"; assets: AssetMeta[] }
   | { kind: "confirmDeleteFolder"; rel: string; label: string }
   | { kind: "settings" }
   /** Side-by-side version compare; `fromVer` is the baseline (null hides the left pane) */
@@ -70,6 +77,8 @@ interface S {
   /** Current view: "" = all assets · "_inbox" = inbox · FAVORITES = starred · TAG_PREFIX+name = tag view · anything else = folder relative path (sentinels start with "/", which no real rel can) */
   folder: string;
   sort: SortKey;
+  /** Sort direction; each key has a natural default (name asc, the rest desc) */
+  sortAsc: boolean;
   assets: AssetMeta[];
   /** Multi-select (Finder semantics: click to select, Cmd-click to toggle, Shift-click for range, Cmd+A for all) */
   selIds: string[];
@@ -83,6 +92,8 @@ interface S {
   viewerAsset: AssetMeta | null;
   /** Registered while a Markdown editor is mounted; null otherwise */
   editorHandle: EditorHandle | null;
+  /** Autosave status surfaced in the title bar while an editor is mounted */
+  saveState: "editing" | "saved" | null;
   paletteOpen: boolean;
   modal: Modal | null;
   toast: Toast | null;
@@ -117,11 +128,17 @@ interface S {
   refresh: () => Promise<void>;
   setFolder: (rel: string) => void;
   setSort: (s: SortKey) => void;
+  toggleSortDir: () => void;
+  /** Shared tail of setSort/toggleSortDir: commit, persist, guarded refetch */
+  applySort: (s: SortKey, asc: boolean) => void;
   setSel: (ids: string[], anchor?: string | null) => void;
   selectAll: () => void;
   openViewer: (id: string) => void;
   closeViewer: () => void;
+  /** Step to the previous/next file of the current view while the viewer is open */
+  viewerStep: (delta: 1 | -1) => void;
   setEditorHandle: (h: EditorHandle | null) => void;
+  setSaveState: (s: "editing" | "saved" | null) => void;
   newMarkdown: (folder?: string) => Promise<void>;
   newHdoc: (folder?: string) => Promise<void>;
   doExportHdoc: (id: string) => Promise<void>;
@@ -169,11 +186,37 @@ function viewExists(
   return tree.children.some(walk);
 }
 
-function fetchAssets(folder: string, sort: SortKey): Promise<AssetMeta[]> {
-  if (folder === FAVORITES) return api.favoriteAssets();
+const SORT_NATURAL_ASC: Record<SortKey, boolean> = {
+  recent: false,
+  name: true,
+  modified: false,
+  size: false,
+};
+
+function initialSort(): { sort: SortKey; sortAsc: boolean } {
+  const [k, d] = (localStorage.getItem("harbly.sort") ?? "").split(":");
+  const sort = (["recent", "name", "modified", "size"] as const).find(
+    (key) => key === k,
+  );
+  if (!sort) return { sort: "recent", sortAsc: false };
+  const sortAsc =
+    d === "asc" || d === "desc" ? d === "asc" : SORT_NATURAL_ASC[sort];
+  return { sort, sortAsc };
+}
+
+function persistSort(sort: SortKey, asc: boolean) {
+  localStorage.setItem("harbly.sort", `${sort}:${asc ? "asc" : "desc"}`);
+}
+
+function fetchAssets(
+  folder: string,
+  sort: SortKey,
+  asc: boolean,
+): Promise<AssetMeta[]> {
+  if (folder === FAVORITES) return api.favoriteAssets(sort, asc);
   return isTagView(folder)
-    ? api.assetsByTag(tagOfView(folder))
-    : api.listAssets(folder, sort);
+    ? api.assetsByTag(tagOfView(folder), sort, asc)
+    : api.listAssets(folder, sort, asc);
 }
 
 /** Destination directory for import/paste: tag and starred views land in the library root, all other views in the current folder */
@@ -187,6 +230,15 @@ function importToast(get: () => S, r: ImportResult): Toast {
   if (r.duplicates) parts.push(tr("dupSkippedN", { n: r.duplicates }));
   if (r.renamed) parts.push(tr("renamedSuffixN", { n: r.renamed }));
   if (r.skipped) parts.push(tr("skippedUnsupportedN", { n: r.skipped }));
+  if (r.failed)
+    parts.push(
+      tr("importPartialFailed", {
+        n: r.failedCount || 1,
+        // Backend detail strings are Chinese-canonical; prefix-map what we
+        // can (IO/DB errors carry dynamic tails, so exact-match would miss)
+        msg: localizeAiError(r.failed),
+      }),
+    );
   const toast: Toast = { text: parts.join(" · ") || tr("nothingImported") };
   if (r.duplicates > 0 && r.dupOf.length > 0) {
     toast.action = {
@@ -198,6 +250,15 @@ function importToast(get: () => S, r: ImportResult): Toast {
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
+
+// Latest-wins token for the viewer: openViewer resolves over IPC, so rapid
+// stepping (↓↓↑) issues concurrent assetGet calls whose completion order is
+// arbitrary — only the newest request may commit. viewerTargetId additionally
+// lets viewerStep chain from the *intended* file instead of the last
+// committed one, so held-down arrows advance one step per keypress, not one
+// step per IPC round-trip.
+let viewerReq = 0;
+let viewerTargetId: string | null = null;
 
 const bootLang = initialLang();
 setCurrentLang(bootLang);
@@ -215,7 +276,7 @@ export const useStore = create<S>((set, get) => ({
   favCount: 0,
   tags: [],
   folder: "",
-  sort: "recent",
+  ...initialSort(),
   assets: [],
   selIds: [],
   anchorId: null,
@@ -224,6 +285,7 @@ export const useStore = create<S>((set, get) => ({
   editingFolder: null,
   viewerAsset: null,
   editorHandle: null,
+  saveState: null,
   paletteOpen: false,
   modal: null,
   toast: null,
@@ -310,7 +372,7 @@ export const useStore = create<S>((set, get) => ({
   },
 
   refresh: async () => {
-    const { folder, sort } = get();
+    const { folder, sort, sortAsc } = get();
     const [tree, inbox, favCount, tags] = await Promise.all([
       api.dirTree(),
       api.inboxCount(),
@@ -318,14 +380,18 @@ export const useStore = create<S>((set, get) => ({
       api.allTags(),
     ]);
     const f = viewExists(tree, tags, folder) ? folder : "";
-    const assets = await fetchAssets(f, sort);
+    const assets = await fetchAssets(f, sort, sortAsc);
     // The user may have navigated or re-sorted while we awaited: committing
     // the captured view now would yank it back (and the navigation's own
     // guarded fetch would then discard its result — the user ends up
     // stranded). Metadata is view-independent and always safe to adopt; the
     // asset list is committed only if the folder AND sort it was fetched for
     // are still current.
-    if (get().folder !== folder || get().sort !== sort) {
+    if (
+      get().folder !== folder ||
+      get().sort !== sort ||
+      get().sortAsc !== sortAsc
+    ) {
       set({ tree, inbox, favCount, tags });
       return;
     }
@@ -343,19 +409,26 @@ export const useStore = create<S>((set, get) => ({
         s.editingAsset && alive.has(s.editingAsset) ? s.editingAsset : null,
     }));
     api.requestThumbs(assets.map((a) => a.id)).catch(() => {});
-    // While the viewer is open, refresh its metadata too (external edit → preview auto-updates; deleted → close)
-    const va = get().viewerAsset;
-    if (va) {
-      try {
-        set({ viewerAsset: await api.assetGet(va.id) });
-      } catch {
+    // While the viewer is open, refresh its metadata too (external edit →
+    // preview auto-updates; deleted → close). Guards: the token catches steps
+    // issued AFTER capture; the viewerTargetId check catches an open already
+    // in flight AT capture (same token — without it, a slow refresh of file A
+    // could land after the step to B commits and yank the user back).
+    const vaId = get().viewerAsset?.id;
+    if (vaId === undefined || viewerTargetId !== vaId) return;
+    const req = viewerReq;
+    try {
+      const fresh = await api.assetGet(vaId);
+      if (req === viewerReq && get().viewerAsset?.id === vaId)
+        set({ viewerAsset: fresh });
+    } catch {
+      if (req === viewerReq && get().viewerAsset?.id === vaId)
         get().closeViewer();
-      }
     }
   },
 
   setFolder: (rel) => {
-    const sort = get().sort;
+    const { sort, sortAsc } = get();
     set({
       folder: rel,
       selIds: [],
@@ -364,12 +437,16 @@ export const useStore = create<S>((set, get) => ({
       editingFolder: null,
       folderArmed: false,
     });
-    fetchAssets(rel, sort)
+    fetchAssets(rel, sort, sortAsc)
       .then((assets) => {
         // Commit only if BOTH the view and the sort are still what this
         // request was issued for — a stale response must never clobber the
         // list a later navigation/sort change already owns.
-        if (get().folder === rel && get().sort === sort) {
+        if (
+          get().folder === rel &&
+          get().sort === sort &&
+          get().sortAsc === sortAsc
+        ) {
           set({ assets });
           api.requestThumbs(assets.map((a) => a.id)).catch(() => {});
         }
@@ -385,13 +462,28 @@ export const useStore = create<S>((set, get) => ({
   },
 
   setSort: (sort) => {
+    get().applySort(sort, SORT_NATURAL_ASC[sort]);
+  },
+
+  toggleSortDir: () => {
+    const { sort, sortAsc } = get();
+    get().applySort(sort, !sortAsc);
+  },
+
+  applySort: (sort, sortAsc) => {
     const folder = get().folder;
-    set({ sort });
-    fetchAssets(folder, sort)
+    set({ sort, sortAsc });
+    persistSort(sort, sortAsc);
+    fetchAssets(folder, sort, sortAsc)
       .then((assets) => {
         // Same latest-wins rule as setFolder: a stale response for an old
         // folder/sort must not overwrite the current view's list.
-        if (get().folder === folder && get().sort === sort) set({ assets });
+        if (
+          get().folder === folder &&
+          get().sort === sort &&
+          get().sortAsc === sortAsc
+        )
+          set({ assets });
       })
       .catch(() => {});
   },
@@ -409,15 +501,45 @@ export const useStore = create<S>((set, get) => ({
   },
 
   openViewer: (id) => {
+    viewerTargetId = id;
+    const req = ++viewerReq;
     api
       .assetGet(id)
-      .then((a) => set({ viewerAsset: a, folderArmed: false }))
-      .catch(() => {});
+      .then((a) => {
+        if (req === viewerReq) set({ viewerAsset: a, folderArmed: false });
+      })
+      .catch(() => {
+        // The target never opened (deleted mid-flight?): roll the anchor back
+        // to whatever is actually shown so arrow-stepping keeps working.
+        if (req === viewerReq) viewerTargetId = get().viewerAsset?.id ?? null;
+      });
   },
 
-  closeViewer: () => set({ viewerAsset: null }),
+  closeViewer: () => {
+    viewerReq++; // cancel any in-flight open
+    viewerTargetId = null;
+    set({ viewerAsset: null });
+  },
+
+  viewerStep: (delta) => {
+    const va = get().viewerAsset;
+    if (!va) return;
+    const list = get().assets;
+    // Anchor on the intended file; if it vanished from the list (deleted
+    // externally), fall back to the committed one so arrows never go dead.
+    let i = list.findIndex((x) => x.id === (viewerTargetId ?? va.id));
+    if (i < 0) i = list.findIndex((x) => x.id === va.id);
+    if (i < 0) return;
+    const ni = i + delta;
+    if (ni < 0 || ni >= list.length) return;
+    get().openViewer(list[ni].id);
+  },
 
   setEditorHandle: (h) => set({ editorHandle: h }),
+
+  setSaveState: (v) => {
+    if (get().saveState !== v) set({ saveState: v });
+  },
 
   // New Markdown lands in `folder` when given (folder context menu), else the
   // current folder — tag/inbox views fall back to the library root, mirroring the
@@ -588,7 +710,9 @@ export const useStore = create<S>((set, get) => ({
     try {
       const undoable = await api.folderDelete(rel);
       set({ folderArmed: false });
-      if (get().folder.startsWith(rel)) get().setFolder("");
+      // Boundary-safe: deleting "doc" must not evict a user viewing "docs"
+      const cur = get().folder;
+      if (cur === rel || cur.startsWith(rel + "/")) get().setFolder("");
       get().showToast(
         undoable
           ? {

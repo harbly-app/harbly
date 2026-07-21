@@ -10,6 +10,62 @@ const ASSET_COLS: &str = "a.id, a.rel_path, a.folder, a.title, a.source, a.size_
     (SELECT GROUP_CONCAT(tag, char(31)) FROM asset_tags t WHERE t.asset_id=a.id), \
     a.favorite";
 
+/// ORDER BY for the asset listing views. The rel_path tiebreak keeps runs
+/// with equal keys (same size, same timestamp) in a deterministic order.
+fn order_clause(sort: SortKey, asc: bool) -> String {
+    let col = match sort {
+        SortKey::Recent => "a.created_at",
+        SortKey::Name => "a.title COLLATE NOCASE",
+        SortKey::Modified => "a.updated_at",
+        SortKey::Size => "a.size_bytes",
+    };
+    let dir = if asc { "ASC" } else { "DESC" };
+    format!("{col} {dir}, a.rel_path COLLATE NOCASE ASC")
+}
+
+/// Snippet highlight sentinels: the SQL snippet() wraps matched tokens in
+/// these control chars (they cannot appear in stored text), and the frontend
+/// turns them into <mark> elements. Localization-neutral by construction.
+pub(crate) const SNIPPET_OPEN: char = '\u{1}';
+pub(crate) const SNIPPET_CLOSE: char = '\u{2}';
+
+/// Chinese/Japanese scripts write without spaces, but the FTS body column is
+/// jieba-tokenized (space-joined), so raw snippets read "这 是 分词 文本".
+/// Drop a space whose nearest non-sentinel neighbours are both no-space CJK.
+/// Hangul is deliberately excluded — Korean uses real spaces.
+fn collapse_cjk_snippet_spaces(s: &str) -> String {
+    fn no_space_cjk(c: char) -> bool {
+        matches!(c,
+            '\u{3000}'..='\u{303F}' // CJK symbols and punctuation
+            | '\u{3040}'..='\u{30FF}' // kana
+            | '\u{3400}'..='\u{4DBF}'
+            | '\u{4E00}'..='\u{9FFF}'
+            | '\u{F900}'..='\u{FAFF}'
+            | '\u{FF00}'..='\u{FFEF}' // fullwidth forms
+            | '…')
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    for (i, &c) in chars.iter().enumerate() {
+        if c == ' ' {
+            let prev = chars[..i]
+                .iter()
+                .rev()
+                .find(|&&x| x != SNIPPET_OPEN && x != SNIPPET_CLOSE);
+            let next = chars[i + 1..]
+                .iter()
+                .find(|&&x| x != SNIPPET_OPEN && x != SNIPPET_CLOSE);
+            if let (Some(&p), Some(&n)) = (prev, next) {
+                if no_space_cjk(p) && no_space_cjk(n) {
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// Recursively copy a directory, skipping hidden entries (.harbly etc.); Finder tag xattrs travel along
 pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
@@ -97,12 +153,8 @@ impl Library {
 
     /// Empty folder string = the "All Assets" view: list the whole library recursively (inbox excluded);
     /// a concrete folder lists only its direct files (Finder convention — subfolder contents are reached via the sidebar tree)
-    pub fn list_assets(&self, folder: &str, sort: SortKey) -> Result<Vec<AssetMeta>> {
-        let order = match sort {
-            SortKey::Recent => "a.created_at DESC",
-            SortKey::Name => "a.title COLLATE NOCASE ASC",
-            SortKey::Modified => "a.updated_at DESC",
-        };
+    pub fn list_assets(&self, folder: &str, sort: SortKey, asc: bool) -> Result<Vec<AssetMeta>> {
+        let order = order_clause(sort, asc);
         let (cond, param) = if folder.is_empty() {
             ("a.folder != ?1", INBOX_DIR)
         } else {
@@ -406,7 +458,7 @@ impl Library {
 
         let db = self.db.lock().unwrap();
         let sql = format!(
-            "SELECT {ASSET_COLS}, snippet(fts, 2, '', '', '…', 10) \
+            "SELECT {ASSET_COLS}, snippet(fts, 2, '{SNIPPET_OPEN}', '{SNIPPET_CLOSE}', '…', 10) \
              FROM fts JOIN assets a ON a.id = fts.asset_id \
              WHERE fts MATCH ?1 ORDER BY bm25(fts) LIMIT 40"
         );
@@ -414,7 +466,7 @@ impl Library {
         let hits = stmt.query_map([&match_q], |r| {
             Ok(SearchHit {
                 asset: row_to_asset(r)?,
-                snippet: r.get(12)?,
+                snippet: collapse_cjk_snippet_spaces(&r.get::<_, String>(12)?),
             })
         });
         // MATCH syntax errors caused by special characters are treated as empty results, not errors
@@ -422,7 +474,9 @@ impl Library {
             Ok(iter) => iter.filter_map(|h| h.ok()).collect(),
             Err(_) => vec![],
         };
-        // Exact tag hits are merged into the results (placed first)
+        // Exact tag hits are merged into the results (placed first). The
+        // language-neutral "#tag" form replaces a formerly hardcoded Chinese
+        // prefix; sentinels render it highlighted like any other match.
         {
             let sql = format!(
                 "SELECT DISTINCT {ASSET_COLS} FROM asset_tags g JOIN assets a ON a.id=g.asset_id WHERE g.tag=?1 LIMIT 20"
@@ -435,7 +489,7 @@ impl Library {
                                 0,
                                 SearchHit {
                                     asset: a,
-                                    snippet: format!("标签: {q}"),
+                                    snippet: format!("{SNIPPET_OPEN}#{q}{SNIPPET_CLOSE}"),
                                 },
                             );
                         }
@@ -472,12 +526,11 @@ impl Library {
         Ok(())
     }
 
-    /// Starred assets, newest first.
-    pub fn favorite_assets(&self) -> Result<Vec<AssetMeta>> {
+    /// Starred assets.
+    pub fn favorite_assets(&self, sort: SortKey, asc: bool) -> Result<Vec<AssetMeta>> {
+        let order = order_clause(sort, asc);
         let db = self.db.lock().unwrap();
-        let sql = format!(
-            "SELECT {ASSET_COLS} FROM assets a WHERE a.favorite=1 ORDER BY a.created_at DESC"
-        );
+        let sql = format!("SELECT {ASSET_COLS} FROM assets a WHERE a.favorite=1 ORDER BY {order}");
         let mut stmt = db.prepare(&sql)?;
         let rows = stmt
             .query_map([], row_to_asset)?
@@ -527,10 +580,11 @@ impl Library {
         Ok(rows)
     }
 
-    pub fn assets_by_tag(&self, tag: &str) -> Result<Vec<AssetMeta>> {
+    pub fn assets_by_tag(&self, tag: &str, sort: SortKey, asc: bool) -> Result<Vec<AssetMeta>> {
+        let order = order_clause(sort, asc);
         let db = self.db.lock().unwrap();
         let sql = format!(
-            "SELECT {ASSET_COLS} FROM asset_tags g JOIN assets a ON a.id=g.asset_id WHERE g.tag=?1 ORDER BY a.created_at DESC"
+            "SELECT {ASSET_COLS} FROM asset_tags g JOIN assets a ON a.id=g.asset_id WHERE g.tag=?1 ORDER BY {order}"
         );
         let mut stmt = db.prepare(&sql)?;
         let rows = stmt
@@ -907,7 +961,7 @@ mod tests {
         std::fs::write(lib.root().join("note.html"), "<title>n</title>").unwrap();
         lib.scan(|_| {}).unwrap();
         let a = lib
-            .list_assets("", crate::SortKey::Recent)
+            .list_assets("", crate::SortKey::Recent, false)
             .unwrap()
             .remove(0);
         assert_eq!(a.file_name, "note.html");
@@ -923,7 +977,7 @@ mod tests {
         std::fs::write(lib.root().join("b.html"), "<title>b</title>").unwrap();
         lib.scan(|_| {}).unwrap();
         let a = lib
-            .list_assets("", crate::SortKey::Recent)
+            .list_assets("", crate::SortKey::Recent, false)
             .unwrap()
             .into_iter()
             .find(|x| x.file_name == "a.html")

@@ -11,7 +11,7 @@ import {
   Sun,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, versionUrl } from "../lib/api";
 import { LANGS, makeT } from "../lib/i18n";
 import { useImeGuard } from "../lib/ime";
@@ -217,50 +217,107 @@ function ConfirmDeleteFolder() {
   );
 }
 
+/** Tri-state per tag when editing several assets at once: "on" = on every
+ * asset, "partial" = on some (left untouched unless cycled), "off" = removed
+ * from all. Single-asset editing degenerates to on/off. */
+type TagTri = "on" | "partial" | "off";
+
 function Tags() {
   const modal = useStore((s) => s.modal);
   const allTags = useStore((s) => s.tags);
   const setModal = useStore((s) => s.setModal);
   const showToast = useStore((s) => s.showToast);
   const t = makeT(useStore((s) => s.lang));
-  const asset = modal?.kind === "tags" ? modal.asset : null;
-  const [selected, setSelected] = useState<Set<string>>(
-    new Set(asset?.tags ?? []),
+  const assets = useMemo(
+    () => (modal?.kind === "tags" ? modal.assets : []),
+    [modal],
   );
+  const [states, setStates] = useState<Map<string, TagTri>>(() => {
+    const m = new Map<string, TagTri>();
+    const counts = new Map<string, number>();
+    for (const a of assets)
+      for (const tag of a.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    for (const [tag, c] of counts)
+      m.set(tag, c === assets.length ? "on" : "partial");
+    return m;
+  });
+  // Initial snapshot: tags that started as "partial" cycle through all three
+  // states (partial → on → off → partial) so a misclick is recoverable.
+  const initialStates = useRef<Map<string, TagTri> | null>(null);
+  initialStates.current ??= new Map(states);
   const [input, setInput] = useState("");
   const ime = useImeGuard();
 
-  if (!asset) return null;
+  if (assets.length === 0) return null;
 
   const candidates = Array.from(
-    new Set([...allTags.map((x) => x.name), ...selected]),
+    new Set([...allTags.map((x) => x.name), ...states.keys()]),
   );
 
-  const toggle = (x: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(x)) next.delete(x);
-      else next.add(x);
+  const cycle = (x: string) =>
+    setStates((prev) => {
+      const next = new Map(prev);
+      const cur = next.get(x) ?? "off";
+      if (initialStates.current?.get(x) === "partial") {
+        next.set(
+          x,
+          cur === "partial" ? "on" : cur === "on" ? "off" : "partial",
+        );
+      } else {
+        next.set(x, cur === "on" ? "off" : "on");
+      }
       return next;
     });
 
   const addInput = () => {
     const x = input.trim().replace(/^#/, "");
     if (!x) return;
-    setSelected((prev) => new Set(prev).add(x));
+    setStates((prev) => new Map(prev).set(x, "on"));
     setInput("");
   };
 
   const ok = async () => {
     // Include un-committed input text in the save too, so it is not silently dropped
-    const final = new Set(selected);
+    const final = new Map(states);
     const pending = input.trim().replace(/^#/, "");
-    if (pending) final.add(pending);
+    if (pending) final.set(pending, "on");
+    // Deltas against the initial snapshot — ONLY what the user actually
+    // changed. Re-asserting untouched "on" tags would roll back concurrent
+    // retags (Finder xattr sync) that the fresh-merge below exists to honor.
+    const init = initialStates.current ?? new Map<string, TagTri>();
+    const adds = [...final]
+      .filter(([tag, s]) => s === "on" && init.get(tag) !== "on")
+      .map(([tag]) => tag);
+    const removes = new Set(
+      [...final]
+        .filter(([tag, s]) => s === "off" && (init.get(tag) ?? "off") !== "off")
+        .map(([tag]) => tag),
+    );
     try {
-      await api.setTags(asset.id, [...final]);
+      let lastMerged: string[] = [];
+      for (const a of assets) {
+        // Merge over the CURRENT tags, not the snapshot from when the modal
+        // opened: a Finder-xattr sync or rescan may have retagged the file
+        // meanwhile, and set_tags is a full replace — merging the stale
+        // snapshot would silently roll those concurrent changes back.
+        const cur =
+          (await api.assetGet(a.id).catch(() => null))?.tags ?? a.tags;
+        const merged = Array.from(
+          new Set([...cur.filter((tag) => !removes.has(tag)), ...adds]),
+        );
+        lastMerged = merged;
+        const unchanged =
+          merged.length === cur.length &&
+          merged.every((tag) => cur.includes(tag));
+        if (!unchanged) await api.setTags(a.id, merged);
+      }
       setModal(null);
       showToast(
-        final.size > 0 ? t("savedTags", { n: final.size }) : t("clearedTags"),
+        assets.length > 1
+          ? t("tagsSavedN", { n: assets.length })
+          : lastMerged.length > 0
+            ? t("savedTags", { n: lastMerged.length })
+            : t("clearedTags"),
       );
     } catch (e) {
       showToast(String(e));
@@ -269,7 +326,11 @@ function Tags() {
 
   return (
     <>
-      <Title>{t("tagsTitle", { name: asset.fileName })}</Title>
+      <Title>
+        {assets.length > 1
+          ? t("tagsTitleN", { n: assets.length })
+          : t("tagsTitle", { name: assets[0].fileName })}
+      </Title>
       <input
         autoFocus
         value={input}
@@ -289,15 +350,17 @@ function Tags() {
           <span className="text-xs text-sub">{t("noTagsYet")}</span>
         )}
         {candidates.map((x) => {
-          const on = selected.has(x);
+          const tri = states.get(x) ?? "off";
           return (
             <button
               key={x}
-              onClick={() => toggle(x)}
+              onClick={() => cycle(x)}
               className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11.5px] font-bold transition ${
-                on
+                tri === "on"
                   ? "border-primary bg-primary text-white"
-                  : "border-line bg-card text-sub2 hover:border-primary/50"
+                  : tri === "partial"
+                    ? "border-dashed border-primary/70 bg-primary/10 text-primary"
+                    : "border-line bg-card text-sub2 hover:border-primary/50"
               }`}
             >
               <Hash className="h-3 w-3" />

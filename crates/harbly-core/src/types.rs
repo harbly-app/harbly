@@ -103,6 +103,13 @@ pub struct ImportResult {
     pub dup_of: Vec<String>,
     /// Relative paths actually written to disk this time (recorded for the undo log)
     pub imported: Vec<String>,
+    /// First per-file error, if any: a failing file no longer aborts the
+    /// batch (which used to drop the undo record for the files already
+    /// imported) — it is reported here instead.
+    pub failed: Option<String>,
+    /// How many files hit a write/index error (kept separate from `skipped`,
+    /// which strictly means unsupported/unreadable sources).
+    pub failed_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -114,4 +121,6 @@ pub enum SortKey {
     Name,
     /// Date modified
     Modified,
+    /// File size
+    Size,
 }

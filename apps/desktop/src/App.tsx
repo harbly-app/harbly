@@ -207,7 +207,7 @@ export default function App() {
 
     // App shortcuts forwarded from inside the sandboxed preview iframe: it is
     // cross-origin, so its keydowns never bubble to this window — the injected
-    // reporter script relays ⌘J/⌘K/⌘B via postMessage instead.
+    // reporter script relays ⌘J/⌘K/⌘B plus Escape/arrows via postMessage.
     const onIframeKey = (e: MessageEvent) => {
       const d = e.data as { __harbly?: string; key?: string } | null;
       if (d?.__harbly !== "key") return;
@@ -216,6 +216,15 @@ export default function App() {
       if (d.key === "j") st.toggleAi();
       else if (d.key === "k") st.setPalette(true);
       else if (d.key === "b") st.toggleSidebar();
+      else if (d.key === "escape") {
+        // Mirror the in-app Escape ladder: overlays first, then the viewer
+        if (st.modal) st.setModal(null);
+        else if (st.paletteOpen) st.setPalette(false);
+        else st.closeViewer();
+      } else if (d.key === "arrowup" || d.key === "arrowdown") {
+        if (!st.modal && !st.paletteOpen)
+          st.viewerStep(d.key === "arrowdown" ? 1 : -1);
+      }
     };
     window.addEventListener("message", onIframeKey);
 
@@ -235,6 +244,11 @@ export default function App() {
         e.preventDefault();
         const st = useStore.getState();
         if (st.phase === "main") st.setModal({ kind: "settings" });
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        // Autosave already covers persistence; ⌘S is the reassurance flush —
+        // the title-bar indicator flips to "saved" when it lands.
+        e.preventDefault();
+        void useStore.getState().editorHandle?.flush();
       }
     };
     window.addEventListener("keydown", onKey);

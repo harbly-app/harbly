@@ -1,6 +1,8 @@
 import * as CM from "@radix-ui/react-context-menu";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  ArrowDown,
+  ArrowUp,
   ClipboardCopy,
   Copy,
   Download,
@@ -58,7 +60,9 @@ export default function AssetGrid() {
   const assets = useStore((s) => s.assets);
   const folder = useStore((s) => s.folder);
   const sort = useStore((s) => s.sort);
+  const sortAsc = useStore((s) => s.sortAsc);
   const setSort = useStore((s) => s.setSort);
+  const toggleSortDir = useStore((s) => s.toggleSortDir);
   const selCount = useStore((s) => s.selIds.length);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -253,7 +257,20 @@ export default function AssetGrid() {
           <option value="recent">{t("sortRecent")}</option>
           <option value="modified">{t("sortModified")}</option>
           <option value="name">{t("sortName")}</option>
+          <option value="size">{t("sortSize")}</option>
         </select>
+        <button
+          onClick={toggleSortDir}
+          title={t(sortAsc ? "sortAscLabel" : "sortDescLabel")}
+          aria-label={t(sortAsc ? "sortAscLabel" : "sortDescLabel")}
+          className="flex h-7 w-7 items-center justify-center rounded-ctl border border-line bg-side text-sub2 transition hover:text-ink"
+        >
+          {sortAsc ? (
+            <ArrowUp className="h-3.5 w-3.5" />
+          ) : (
+            <ArrowDown className="h-3.5 w-3.5" />
+          )}
+        </button>
       </div>
 
       <div
@@ -515,6 +532,16 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
                   })
                 }
               />
+              <MItem
+                icon={<TagIcon className="h-3.5 w-3.5" />}
+                label={t("tagsMenu")}
+                onClick={() =>
+                  st().setModal({
+                    kind: "tags",
+                    assets: st().assets.filter((x) => selIds().includes(x.id)),
+                  })
+                }
+              />
               <MSep />
               <MItem
                 danger
@@ -573,7 +600,7 @@ function Card({ a, w, inbox }: { a: AssetMeta; w: number; inbox: boolean }) {
               <MItem
                 icon={<TagIcon className="h-3.5 w-3.5" />}
                 label={t("tagsMenu")}
-                onClick={() => st().setModal({ kind: "tags", asset: a })}
+                onClick={() => st().setModal({ kind: "tags", assets: [a] })}
               />
               <MItem
                 icon={<Sparkles className="h-3.5 w-3.5" />}

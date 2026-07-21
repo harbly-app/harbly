@@ -104,8 +104,39 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("Harbly failed to start")
-        .run(|_app, event| {
-            if let tauri::RunEvent::Exit = event {
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { code, api, .. } => {
+                // macOS convention: closing the last window keeps the app in
+                // the Dock. Note ⌘Q (native terminate:) never reaches
+                // ExitRequested at all — it goes straight to RunEvent::Exit;
+                // Some(code) here only comes from AppHandle::exit()/restart().
+                // code == None marks exactly the "last window closed" path,
+                // which is the one we intercept. macOS-only so a future
+                // Windows/Linux port doesn't gain a windowless zombie process.
+                #[cfg(target_os = "macos")]
+                if code.is_none() {
+                    api.prevent_exit();
+                }
+                #[cfg(not(target_os = "macos"))]
+                let _ = (code, api);
+            }
+            tauri::RunEvent::Reopen { .. } => {
+                // Dock icon click. The hidden thumb-worker window can keep the
+                // process alive after ⌘W destroys "main", so the main window
+                // must be re-shown or rebuilt from its config here.
+                use tauri::Manager;
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.show();
+                    let _ = win.set_focus();
+                } else if let Some(cfg) =
+                    app.config().app.windows.iter().find(|w| w.label == "main")
+                {
+                    if let Ok(builder) = tauri::WebviewWindowBuilder::from_config(app, cfg) {
+                        let _ = builder.build();
+                    }
+                }
+            }
+            tauri::RunEvent::Exit => {
                 // ⌘Q teardown. Tokio tasks are never dropped on process exit, so
                 // the per-run kill paths (kill_on_drop, cancel checks) cannot
                 // fire — without this hook a mid-turn claude/codex CLI (its own
@@ -114,5 +145,6 @@ pub fn run() {
                 // keeps burning the user's API quota.
                 harbly_ai::kill_all_agent_groups();
             }
+            _ => {}
         });
 }

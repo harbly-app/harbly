@@ -51,12 +51,7 @@ export default function Viewer() {
         st.closeViewer();
       } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        const list = st.assets;
-        const i = list.findIndex((x) => x.id === va.id);
-        if (i < 0) return;
-        const ni = e.key === "ArrowDown" ? i + 1 : i - 1;
-        if (ni < 0 || ni >= list.length) return;
-        st.openViewer(list[ni].id);
+        st.viewerStep(e.key === "ArrowDown" ? 1 : -1);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -88,6 +83,9 @@ export default function Viewer() {
   return <ViewerBody key={a.id} a={a} t={t} dragging={dragging} />;
 }
 
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2;
+
 function ViewerBody({
   a,
   t,
@@ -99,6 +97,52 @@ function ViewerBody({
 }) {
   // One-time allow token: only valid for this viewing session (component lifetime)
   const [allowToken, setAllowToken] = useState<string | null>(null);
+  // Reading zoom, per viewing session (archived pages are often authored for
+  // wide desktop layouts). Lives here, above PreviewPane's sandbox remounts.
+  const [zoom, setZoom] = useState(1);
+
+  const bumpZoom = (dir: 1 | -1) =>
+    setZoom((z) =>
+      Math.min(
+        ZOOM_MAX,
+        Math.max(ZOOM_MIN, Math.round((z + dir * 0.1) * 10) / 10),
+      ),
+    );
+
+  // ⌘+ / ⌘− / ⌘0 (browser-standard zoom keys), scoped to the raw HTML viewer.
+  // The same keys arrive via postMessage when focus sits inside the sandboxed
+  // iframe — its keydowns never bubble to this window (see protocol.rs).
+  useEffect(() => {
+    const apply = (key: string): boolean => {
+      if (key === "=" || key === "+") bumpZoom(1);
+      else if (key === "-") bumpZoom(-1);
+      else if (key === "0") setZoom(1);
+      else return false;
+      return true;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.isContentEditable)
+      )
+        return;
+      if (apply(e.key)) e.preventDefault();
+    };
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data as { __harbly?: string; key?: string } | null;
+      if (d?.__harbly === "key" && d.key) apply(d.key);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("message", onMsg);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("message", onMsg);
+    };
+  }, []);
 
   const allowOnce = () => {
     api
@@ -110,7 +154,7 @@ function ViewerBody({
   return (
     <main className="flex min-w-0 flex-1 flex-col bg-paper">
       {/* Document canvas stays literal white in both themes: assets are standalone pages that assume a white default background (Quick Look behaves the same) */}
-      <div className="relative flex-1 bg-white">
+      <div className="relative flex-1 overflow-hidden bg-white">
         {/* Keyed per content session (file version × sandbox state) so the CSP block counter starts from zero each time */}
         <PreviewPane
           key={`${a.currentHash}:${allowToken ?? "sandboxed"}`}
@@ -118,9 +162,33 @@ function ViewerBody({
           t={t}
           dragging={dragging}
           allowToken={allowToken}
+          zoom={zoom}
           onAllowOnce={allowOnce}
           onRestoreSandbox={() => setAllowToken(null)}
         />
+        <div className="absolute bottom-3 left-3 flex items-center overflow-hidden rounded-full border border-line bg-card/90 text-[11px] text-sub shadow-sm backdrop-blur">
+          <button
+            onClick={() => bumpZoom(-1)}
+            title={`${t("zoomOut")} (⌘−)`}
+            className="px-2 py-1.5 transition hover:bg-side hover:text-ink"
+          >
+            −
+          </button>
+          <button
+            onClick={() => setZoom(1)}
+            title={`${t("zoomReset")} (⌘0)`}
+            className="min-w-[44px] px-1 py-1.5 text-center tabular-nums transition hover:bg-side hover:text-ink"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            onClick={() => bumpZoom(1)}
+            title={`${t("zoomIn")} (⌘+)`}
+            className="px-2 py-1.5 transition hover:bg-side hover:text-ink"
+          >
+            +
+          </button>
+        </div>
       </div>
     </main>
   );
@@ -131,6 +199,7 @@ function PreviewPane({
   t,
   dragging,
   allowToken,
+  zoom,
   onAllowOnce,
   onRestoreSandbox,
 }: {
@@ -138,6 +207,7 @@ function PreviewPane({
   t: TFn;
   dragging: boolean;
   allowToken: string | null;
+  zoom: number;
   onAllowOnce: () => void;
   onRestoreSandbox: () => void;
 }) {
@@ -158,7 +228,16 @@ function PreviewPane({
       <iframe
         src={`${assetUrl(a.id)}${allowToken ? `?allow=${allowToken}` : ""}`}
         sandbox="allow-scripts allow-same-origin"
-        className={`absolute inset-0 h-full w-full border-0 ${dragging ? "pointer-events-none" : ""}`}
+        className={`absolute inset-0 border-0 ${dragging ? "pointer-events-none" : ""}`}
+        // Scale-with-compensation: the iframe is cross-origin, so zoom cannot
+        // be applied inside the document; scaling the element (with inverse
+        // width/height so the layout viewport matches) reads the same.
+        style={{
+          transform: zoom === 1 ? undefined : `scale(${zoom})`,
+          transformOrigin: "0 0",
+          width: `${100 / zoom}%`,
+          height: `${100 / zoom}%`,
+        }}
         title={a.title}
       />
       {allowToken ? (

@@ -10,11 +10,32 @@ import {
   SquarePen,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { api } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import type { SearchHit } from "../lib/types";
 import { creationDest, INBOX, isHdoc, isMd } from "../lib/types";
+
+/** The backend wraps matched tokens in U+0001…U+0002 sentinels (see
+ * ops.rs search); render them as highlighted <mark> runs. */
+function renderSnippet(s: string): ReactNode[] {
+  const parts = s.split("\u0001");
+  const out: ReactNode[] = [parts[0]];
+  for (let i = 1; i < parts.length; i++) {
+    const [hit, ...rest] = parts[i].split("\u0002");
+    out.push(
+      <mark
+        key={i}
+        className="rounded-[3px] bg-primary/15 px-px font-semibold text-primary"
+      >
+        {hit}
+      </mark>,
+    );
+    out.push(rest.join("\u0002"));
+  }
+  return out;
+}
 
 export default function CommandPalette() {
   const open = useStore((s) => s.paletteOpen);
@@ -107,7 +128,7 @@ function PaletteBody() {
                     {h.asset.folder === INBOX
                       ? t("inbox")
                       : h.asset.folder || t("libraryRoot")}
-                    {h.snippet ? ` · ${h.snippet}` : ""}
+                    {h.snippet ? <> · {renderSnippet(h.snippet)}</> : null}
                   </div>
                 </div>
                 <span className="shrink-0 text-[10px] text-sub">

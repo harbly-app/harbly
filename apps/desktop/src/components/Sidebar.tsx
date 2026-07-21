@@ -492,7 +492,9 @@ function FileRow(props: {
           <MItem
             icon={<TagIcon className="h-3.5 w-3.5" />}
             label={t("tagsMenu")}
-            onClick={withMeta((a) => st().setModal({ kind: "tags", asset: a }))}
+            onClick={withMeta((a) =>
+              st().setModal({ kind: "tags", assets: [a] }),
+            )}
           />
           <MItem
             icon={<ClipboardCopy className="h-3.5 w-3.5" />}

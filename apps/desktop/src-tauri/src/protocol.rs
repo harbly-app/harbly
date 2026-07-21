@@ -38,9 +38,45 @@ fn hdoc_csp(nonce: &str) -> String {
 /// Injected into every previewed page: (1) CSP-violation counter for the
 /// "N blocked" pill; (2) app-shortcut forwarding — the preview iframe is
 /// cross-origin, so once it has focus the host window would never see
-/// ⌘J/⌘K/⌘B keydowns. Forwarding is one-way and limited to benign UI toggles,
-/// so a malicious page spoofing the message can at worst flip a panel.
-const CSP_REPORTER: &str = "<script>(function(){var n=0;addEventListener('securitypolicyviolation',function(e){n++;try{parent.postMessage({__harbly:'csp',count:n,uri:String(e.blockedURI||'')},'*')}catch(_){}});addEventListener('keydown',function(e){var k=String(e.key||'').toLowerCase();if((e.metaKey||e.ctrlKey)&&(k==='j'||k==='k'||k==='b')){e.preventDefault();try{parent.postMessage({__harbly:'key',key:k},'*')}catch(_){}}})})();</script>";
+/// ⌘J/⌘K/⌘B, ⌘±/⌘0 (zoom), Escape or arrow keydowns. Forwarding is one-way
+/// and limited to benign UI actions (panel toggles, zoom, close, file
+/// navigation), so a malicious page spoofing the message can at worst flip a
+/// panel or switch files.
+///
+/// Escape and arrows: skipped while a native <dialog open> exists (its
+/// Escape-cancel never sets defaultPrevented) and relayed via setTimeout(0)
+/// with a defaultPrevented re-check, so ANY page handler — including
+/// window-level ones registered after this script — can veto them. Arrows
+/// additionally require that neither the root document nor the scroll
+/// container under the last pointer press has anywhere to scroll (their
+/// default action is then a no-op, so no preventDefault is needed), keeping
+/// native arrow-key scrolling intact. Event targets go through composedPath
+/// when available so shadow-DOM inputs/scrollers are seen, not their hosts.
+const CSP_REPORTER: &str = concat!(
+    "<script>(function(){var n=0;var mp=null;",
+    "function relay(k){try{parent.postMessage({__harbly:'key',key:k},'*')}catch(_){}}",
+    "function tgt(e){return (e.composedPath&&e.composedPath()[0])||e.target}",
+    "addEventListener('securitypolicyviolation',function(e){n++;",
+    "try{parent.postMessage({__harbly:'csp',count:n,uri:String(e.blockedURI||'')},'*')}catch(_){}});",
+    "addEventListener('pointerdown',function(e){mp=tgt(e)},true);",
+    "function innerScrollable(el){for(var x=el;x&&x.nodeType===1;x=x.parentElement||(x.getRootNode&&x.getRootNode().host)){",
+    "var oy;try{oy=getComputedStyle(x).overflowY}catch(_){return true}",
+    "if((oy==='auto'||oy==='scroll'||oy==='overlay')&&x.scrollHeight>x.clientHeight+1)return true}",
+    "return false}",
+    "addEventListener('keydown',function(e){var k=String(e.key||'').toLowerCase();",
+    "if((e.metaKey||e.ctrlKey)&&!e.altKey&&(k==='j'||k==='k'||k==='b'||k==='='||k==='+'||k==='-'||k==='0')){",
+    "e.preventDefault();relay(k);return}",
+    "if(e.metaKey||e.ctrlKey||e.altKey||e.defaultPrevented)return;",
+    "var t=tgt(e),tag=t&&t.tagName?String(t.tagName).toUpperCase():'';",
+    "if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||(t&&t.isContentEditable))return;",
+    "if(k!=='escape'&&k!=='arrowup'&&k!=='arrowdown')return;",
+    "if(document.querySelector('dialog[open]'))return;",
+    "if(k!=='escape'){var s=document.scrollingElement;",
+    "if(!s||s.scrollHeight>s.clientHeight+1)return;",
+    "if(mp&&innerScrollable(mp))return}",
+    "setTimeout(function(){if(!e.defaultPrevented)relay(k)},0)",
+    "})})();</script>"
+);
 
 fn resp(
     status: u16,

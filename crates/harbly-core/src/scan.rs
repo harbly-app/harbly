@@ -603,35 +603,84 @@ impl Library {
                 .unwrap_or("导入.html")
                 .replace('/', "-");
             let name = unique_name(&dest_dir, &orig_name);
-            if name != orig_name {
-                res.renamed += 1;
-            }
+            let collided = name != orig_name;
             let dest = dest_dir.join(&name);
-            std::fs::write(&dest, &content)?;
-            let _ = crate::tags_xattr::copy_tags(p, &dest); // the source file's Finder tags are kept through import
-            let md = std::fs::metadata(&dest)?;
-            let mtime = md
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0);
             let rel = if dest_rel.is_empty() {
                 name.clone()
             } else {
                 format!("{dest_rel}/{name}")
             };
-            self.insert_new_asset(
-                &rel,
-                &content,
-                &hash,
-                content.len() as i64,
-                mtime,
-                "import",
-                "初始导入",
-            )?;
-            res.imported.push(rel);
-            res.added += 1;
+            // A failing file must not abort the batch: the caller records the
+            // undo entry from `imported`, so bailing here would leave already-
+            // imported files with no undo record. Skip, report, roll back the
+            // half-written file, continue.
+            let attempt = || -> Result<()> {
+                std::fs::write(&dest, &content)?;
+                let _ = crate::tags_xattr::copy_tags(p, &dest); // the source file's Finder tags are kept through import
+                let md = std::fs::metadata(&dest)?;
+                let mtime = md
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                self.insert_new_asset(
+                    &rel,
+                    &content,
+                    &hash,
+                    content.len() as i64,
+                    mtime,
+                    "import",
+                    "初始导入",
+                )?;
+                Ok(())
+            };
+            // A row occupying this rel while no file exists on disk (deleted
+            // in Finder, not yet rescanned) fails the UNIQUE(rel_path) insert
+            // — same cleanup the next scan would do, then one retry so the
+            // first import attempt succeeds instead of asking the user to
+            // press import twice.
+            let clean_ghost_row = || {
+                let ghost: Option<String> = {
+                    let db = self.db.lock().unwrap();
+                    db.query_row("SELECT id FROM assets WHERE rel_path=?1", [&rel], |r| {
+                        r.get(0)
+                    })
+                    .optional()
+                    .ok()
+                    .flatten()
+                };
+                if let Some(id) = ghost {
+                    let _ = self.remove_asset_rows(&id, true);
+                    true
+                } else {
+                    false
+                }
+            };
+            let mut one = attempt();
+            if one.is_err() && clean_ghost_row() {
+                one = attempt();
+            }
+            match one {
+                Ok(()) => {
+                    if collided {
+                        res.renamed += 1;
+                    }
+                    res.imported.push(rel);
+                    res.added += 1;
+                }
+                Err(e) => {
+                    // Roll back whatever half-landed: any asset row committed
+                    // before a later failure (e.g. on the version write) would
+                    // be a ghost shadowing future re-imports via hash dedup.
+                    clean_ghost_row();
+                    let _ = std::fs::remove_file(&dest);
+                    res.failed_count += 1;
+                    if res.failed.is_none() {
+                        res.failed = Some(e.to_string());
+                    }
+                }
+            }
         }
         Ok(res)
     }
@@ -650,7 +699,7 @@ mod tests {
         .unwrap();
         lib.scan(|_| {}).unwrap();
         let a = lib
-            .list_assets("", crate::SortKey::Recent)
+            .list_assets("", crate::SortKey::Recent, false)
             .unwrap()
             .remove(0);
         // Simulate the crash leftover: a version row whose file never landed
@@ -686,7 +735,7 @@ mod tests {
         .unwrap();
         lib.scan(|_| {}).unwrap();
         let a = lib
-            .list_assets("", crate::SortKey::Recent)
+            .list_assets("", crate::SortKey::Recent, false)
             .unwrap()
             .remove(0);
 
@@ -715,7 +764,7 @@ mod tests {
         lib.rename_folder("F", "G").unwrap();
 
         let mut ids: Vec<String> = lib
-            .list_assets("G", crate::SortKey::Recent)
+            .list_assets("G", crate::SortKey::Recent, false)
             .unwrap()
             .into_iter()
             .map(|x| x.id)
@@ -743,7 +792,7 @@ mod tests {
         .unwrap();
         lib.scan(|_| {}).unwrap();
         let a = lib
-            .list_assets("", crate::SortKey::Recent)
+            .list_assets("", crate::SortKey::Recent, false)
             .unwrap()
             .remove(0);
 
@@ -754,7 +803,7 @@ mod tests {
         .unwrap();
         lib.scan(|_| {}).unwrap();
 
-        let assets = lib.list_assets("", crate::SortKey::Recent).unwrap();
+        let assets = lib.list_assets("", crate::SortKey::Recent, false).unwrap();
         assert_eq!(assets.len(), 1, "one physical file must stay one asset");
         assert_eq!(
             assets[0].id, a.id,
@@ -810,7 +859,7 @@ mod tests {
         std::fs::write(&file, "<html><title>A</title><body>x</body></html>").unwrap();
         lib.scan(|_| {}).unwrap();
         let a = lib
-            .list_assets("", crate::SortKey::Recent)
+            .list_assets("", crate::SortKey::Recent, false)
             .unwrap()
             .remove(0);
         assert_eq!(lib.list_versions(&a.id).unwrap().len(), 1);
@@ -826,7 +875,7 @@ mod tests {
         let sum = lib.scan(|_| {}).unwrap();
         assert_eq!(sum.removed, 1);
         assert!(lib
-            .list_assets("", crate::SortKey::Recent)
+            .list_assets("", crate::SortKey::Recent, false)
             .unwrap()
             .is_empty());
         assert!(lib.list_versions(&a.id).unwrap().is_empty());

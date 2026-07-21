@@ -283,7 +283,7 @@ impl Library {
                 let assets = if folder.is_empty() {
                     self.all_assets().map_err(|e| e.to_string())?
                 } else {
-                    self.list_assets(folder, crate::SortKey::Name)
+                    self.list_assets(folder, crate::SortKey::Name, true)
                         .map_err(|e| e.to_string())?
                 };
                 let total = assets.len();
@@ -331,7 +331,12 @@ impl Library {
                             "title": h.asset.title,
                             "file_name": h.asset.file_name,
                             "folder": h.asset.folder,
-                            "snippet": h.snippet,
+                            // The U+0001/U+0002 highlight sentinels are a
+                            // frontend rendering contract — for the model
+                            // they are noise it might echo into written files.
+                            "snippet": h
+                                .snippet
+                                .replace([crate::ops::SNIPPET_OPEN, crate::ops::SNIPPET_CLOSE], ""),
                         })
                     })
                     .collect();

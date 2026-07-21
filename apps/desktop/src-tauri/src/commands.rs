@@ -270,10 +270,11 @@ pub async fn list_assets(
     app: AppHandle,
     folder: String,
     sort: harbly_core::SortKey,
+    asc: bool,
 ) -> Result<Vec<harbly_core::AssetMeta>, String> {
     app.state::<AppState>()
         .lib()?
-        .list_assets(&folder, sort)
+        .list_assets(&folder, sort, asc)
         .map_err(|e| e.to_string())
 }
 
@@ -1226,10 +1227,14 @@ pub async fn set_favorite(app: AppHandle, id: String, favorite: bool) -> Result<
 }
 
 #[tauri::command]
-pub async fn favorite_assets(app: AppHandle) -> Result<Vec<harbly_core::AssetMeta>, String> {
+pub async fn favorite_assets(
+    app: AppHandle,
+    sort: harbly_core::SortKey,
+    asc: bool,
+) -> Result<Vec<harbly_core::AssetMeta>, String> {
     app.state::<AppState>()
         .lib()?
-        .favorite_assets()
+        .favorite_assets(sort, asc)
         .map_err(|e| e.to_string())
 }
 
@@ -1253,10 +1258,12 @@ pub async fn all_tags(app: AppHandle) -> Result<Vec<harbly_core::TagInfo>, Strin
 pub async fn assets_by_tag(
     app: AppHandle,
     tag: String,
+    sort: harbly_core::SortKey,
+    asc: bool,
 ) -> Result<Vec<harbly_core::AssetMeta>, String> {
     app.state::<AppState>()
         .lib()?
-        .assets_by_tag(&tag)
+        .assets_by_tag(&tag, sort, asc)
         .map_err(|e| e.to_string())
 }
 

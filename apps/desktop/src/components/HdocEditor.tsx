@@ -1,4 +1,4 @@
-import { ListTree, RefreshCw } from "lucide-react";
+import { List, ListTree, RefreshCw } from "lucide-react";
 import { baseKeymap } from "prosemirror-commands";
 import { dropCursor } from "prosemirror-dropcursor";
 import { gapCursor } from "prosemirror-gapcursor";
@@ -51,6 +51,12 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
   const [theme, setTheme] = useState("paper");
   const [layout, setLayout] = useState("article");
   const [headings, setHeadings] = useState<HeadingRef[]>([]);
+  // Outline visibility is an EDITOR preference, not a document property:
+  // null = follow the layout's default (docs shows it), toggle overrides.
+  // Decoupled so "I want heading navigation" never forces the exported
+  // page into the docs layout.
+  const [outline, setOutline] = useState<boolean | null>(null);
+  const showOutline = outline ?? layout === "docs";
   const actions = useRef<{
     reload: () => void;
     keepMine: () => void;
@@ -129,6 +135,9 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
             reflectDoc(newState.doc);
             if (trx.docChanged && ready.v) {
               dirty.v = true;
+              // gone(): a late async dispatch (image insert resolving) must
+              // not resurrect the badge after unmount cleanup nulled it.
+              if (!gone()) useStore.getState().setSaveState("editing");
               scheduleSave();
             }
           },
@@ -173,6 +182,9 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
       const body = serializeHdoc(view.state.doc);
       if (!force && body === lastSavedBody.v) {
         dirty.v = false;
+        // The unmount flush also lands here — after cleanup already reset the
+        // global saveState to null, it must not be resurrected as "saved".
+        if (!gone()) useStore.getState().setSaveState("saved");
         return;
       }
       try {
@@ -180,6 +192,7 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
         lastSavedBody.v = body;
         lastSavedHash.v = meta.currentHash;
         dirty.v = false;
+        if (!gone()) useStore.getState().setSaveState("saved");
         useStore.setState((s) =>
           s.viewerAsset?.id === meta.id ? { viewerAsset: meta } : {},
         );
@@ -228,6 +241,7 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
       conflicted.v = false;
       ready.v = true;
       setConflict(false);
+      useStore.getState().setSaveState("saved");
     };
 
     const doUndo = () => {
@@ -286,6 +300,7 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
       useStore
         .getState()
         .setEditorHandle({ undo: doUndo, redo: doRedo, flush });
+      useStore.getState().setSaveState("saved");
     })();
 
     return () => {
@@ -294,6 +309,7 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
       document.removeEventListener("visibilitychange", onVisibility);
       if (saveTimer) clearTimeout(saveTimer);
       useStore.getState().setEditorHandle(null);
+      useStore.getState().setSaveState(null);
       pmViewRef.current = null;
       const dying = view;
       // An unresolved conflict froze autosave, so the flush below will bail —
@@ -378,6 +394,8 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
         t={t}
         layout={layout}
         onLayout={(v) => actions.current.setLayout(v)}
+        outlineOn={showOutline}
+        onToggleOutline={() => setOutline(!showOutline)}
         themeSel={
           <ThemeSelect
             theme={theme}
@@ -387,7 +405,7 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
         }
       />
       <div className="flex min-h-0 flex-1">
-        {layout === "docs" && (
+        {showOutline && (
           <aside className="w-56 shrink-0 overflow-y-auto border-r border-line px-2.5 py-3">
             <div className="px-2 pb-1 text-[10.5px] font-bold text-sub">
               {t("insToc")}
@@ -481,12 +499,16 @@ function InsertToolbar({
   t,
   layout,
   onLayout,
+  outlineOn,
+  onToggleOutline,
   themeSel,
 }: {
   viewRef: React.RefObject<EditorView | null>;
   t: TFn;
   layout: string;
   onLayout: (v: string) => void;
+  outlineOn: boolean;
+  onToggleOutline: () => void;
   themeSel: React.ReactNode;
 }) {
   const items = hdocItems();
@@ -586,6 +608,22 @@ function InsertToolbar({
         }`}
       >
         <ListTree className="h-3.5 w-3.5" />
+      </button>
+      <button
+        onClick={() => {
+          hideTip();
+          onToggleOutline();
+        }}
+        aria-label={t("outlineToggle")}
+        onMouseEnter={showTip(t("outlineToggle"))}
+        onMouseLeave={hideTip}
+        className={`grid h-7 w-7 shrink-0 place-items-center rounded-ctl transition ${
+          outlineOn
+            ? "bg-primary/10 text-primary"
+            : "text-sub hover:bg-side hover:text-ink"
+        }`}
+      >
+        <List className="h-3.5 w-3.5" />
       </button>
       <div className="min-w-3 flex-1" />
       {themeSel}
