@@ -53,6 +53,10 @@ fn hdoc_csp(nonce: &str) -> String {
 /// native arrow-key scrolling intact. Event targets go through composedPath
 /// when available so shadow-DOM inputs/scrollers are seen, not their hosts.
 const CSP_REPORTER: &str = concat!(
+    // In-page find highlight styles (CSS Custom Highlight API; style-src
+    // 'unsafe-inline' is already part of both sandbox CSPs)
+    "<style>::highlight(harbly-find){background-color:rgba(250,204,21,.45)}",
+    "::highlight(harbly-find-active){background-color:rgba(245,158,11,.85);color:#1a1523}</style>",
     "<script>(function(){var n=0;var mp=null;",
     "function relay(k){try{parent.postMessage({__harbly:'key',key:k},'*')}catch(_){}}",
     "function tgt(e){return (e.composedPath&&e.composedPath()[0])||e.target}",
@@ -64,7 +68,7 @@ const CSP_REPORTER: &str = concat!(
     "if((oy==='auto'||oy==='scroll'||oy==='overlay')&&x.scrollHeight>x.clientHeight+1)return true}",
     "return false}",
     "addEventListener('keydown',function(e){var k=String(e.key||'').toLowerCase();",
-    "if((e.metaKey||e.ctrlKey)&&!e.altKey&&(k==='j'||k==='k'||k==='b'||k==='='||k==='+'||k==='-'||k==='0')){",
+    "if((e.metaKey||e.ctrlKey)&&!e.altKey&&(k==='j'||k==='k'||k==='b'||k==='f'||k==='='||k==='+'||k==='-'||k==='0')){",
     "e.preventDefault();relay(k);return}",
     "if(e.metaKey||e.ctrlKey||e.altKey||e.defaultPrevented)return;",
     "var t=tgt(e),tag=t&&t.tagName?String(t.tagName).toUpperCase():'';",
@@ -75,7 +79,35 @@ const CSP_REPORTER: &str = concat!(
     "if(!s||s.scrollHeight>s.clientHeight+1)return;",
     "if(mp&&innerScrollable(mp))return}",
     "setTimeout(function(){if(!e.defaultPrevented)relay(k)},0)",
-    "})})();</script>"
+    "});",
+    // ---- in-page find runtime (driven by the FindBar via postMessage) ----
+    "var fr=[],fa=0;",
+    "function frReply(){try{parent.postMessage({__harbly:'findResult',count:fr.length,active:fr.length?fa+1:0},'*')}catch(_){}}",
+    "function frPaint(){if(!window.CSS||!CSS.highlights||!window.Highlight)return;",
+    "CSS.highlights.delete('harbly-find');CSS.highlights.delete('harbly-find-active');",
+    "if(!fr.length)return;",
+    "var all=new Highlight();for(var i=0;i<fr.length;i++)if(i!==fa)all.add(fr[i]);",
+    "CSS.highlights.set('harbly-find',all);",
+    "CSS.highlights.set('harbly-find-active',new Highlight(fr[fa]))}",
+    "function frScroll(){var r=fr[fa];if(!r)return;",
+    "var el=r.startContainer.parentElement;if(el&&el.scrollIntoView)el.scrollIntoView({block:'center'})}",
+    "function frSearch(q){fr=[];fa=0;",
+    "if(q&&document.body){var ql=q.toLowerCase();",
+    "var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null);var nd;",
+    "while((nd=w.nextNode())){var pe=nd.parentElement;",
+    "if(!pe||pe.closest('script,style,noscript'))continue;",
+    "var tl=String(nd.nodeValue||'').toLowerCase(),i=0;",
+    "while((i=tl.indexOf(ql,i))!==-1){var r=new Range();",
+    "try{r.setStart(nd,i);r.setEnd(nd,i+ql.length);if(r.getClientRects().length)fr.push(r)}catch(_){}",
+    "i+=ql.length}}}",
+    "frPaint();frScroll();frReply()}",
+    "addEventListener('message',function(ev){var d=ev.data;",
+    "if(!d||d.__harbly!=='find')return;",
+    "if(d.op==='clear'){fr=[];fa=0;frPaint();return}",
+    "if(d.op==='search'){frSearch(String(d.q||''));return}",
+    "if(d.op==='step'&&fr.length){fa=(fa+(d.delta|0)+fr.length)%fr.length;frPaint();frScroll()}",
+    "if(d.op==='step')frReply()});",
+    "})();</script>"
 );
 
 fn resp(

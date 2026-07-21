@@ -54,6 +54,15 @@ export interface Toast {
   action?: { label: string; fn: () => void };
 }
 
+/** Bridge from the FindBar to whatever surface is open: the PM editors
+ * answer synchronously, the sandboxed preview proxies over postMessage.
+ * `active` is 1-based; 0 = no matches. */
+export interface FindHandle {
+  search(q: string): Promise<{ count: number; active: number }>;
+  step(delta: 1 | -1): Promise<{ count: number; active: number }>;
+  clear(): void;
+}
+
 /** Bridge to the mounted Markdown editor so the native menu (⌘Z/⌘⇧Z) can drive
  * ProseMirror's own history, and quit/close can flush a pending autosave. */
 export interface EditorHandle {
@@ -94,6 +103,9 @@ interface S {
   editorHandle: EditorHandle | null;
   /** Autosave status surfaced in the title bar while an editor is mounted */
   saveState: "editing" | "saved" | null;
+  /** In-document find bar (⌘F): visible only while a surface has registered */
+  findOpen: boolean;
+  findHandle: FindHandle | null;
   paletteOpen: boolean;
   modal: Modal | null;
   toast: Toast | null;
@@ -139,6 +151,9 @@ interface S {
   viewerStep: (delta: 1 | -1) => void;
   setEditorHandle: (h: EditorHandle | null) => void;
   setSaveState: (s: "editing" | "saved" | null) => void;
+  setFindHandle: (h: FindHandle | null) => void;
+  openFind: () => void;
+  closeFind: () => void;
   newMarkdown: (folder?: string) => Promise<void>;
   newHdoc: (folder?: string) => Promise<void>;
   doExportHdoc: (id: string) => Promise<void>;
@@ -286,6 +301,8 @@ export const useStore = create<S>((set, get) => ({
   viewerAsset: null,
   editorHandle: null,
   saveState: null,
+  findOpen: false,
+  findHandle: null,
   paletteOpen: false,
   modal: null,
   toast: null,
@@ -518,7 +535,7 @@ export const useStore = create<S>((set, get) => ({
   closeViewer: () => {
     viewerReq++; // cancel any in-flight open
     viewerTargetId = null;
-    set({ viewerAsset: null });
+    set({ viewerAsset: null, findOpen: false });
   },
 
   viewerStep: (delta) => {
@@ -539,6 +556,20 @@ export const useStore = create<S>((set, get) => ({
 
   setSaveState: (v) => {
     if (get().saveState !== v) set({ saveState: v });
+  },
+
+  // A null here does NOT close the bar: switching files remounts the surface
+  // (null → new handle) and the open bar re-runs its query on the new file.
+  // Leaving the viewer entirely closes it via closeViewer instead.
+  setFindHandle: (h) => set({ findHandle: h }),
+
+  openFind: () => {
+    if (get().findHandle) set({ findOpen: true });
+  },
+
+  closeFind: () => {
+    get().findHandle?.clear();
+    set({ findOpen: false });
   },
 
   // New Markdown lands in `folder` when given (folder context menu), else the

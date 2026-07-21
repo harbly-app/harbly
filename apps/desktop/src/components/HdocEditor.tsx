@@ -12,6 +12,7 @@ import { Fragment as ReactFragment, useEffect, useRef, useState } from "react";
 import { api, assetUrl } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import type { TFn } from "../lib/i18n";
+import { clearFind, findPlugin, runFind, stepFind } from "../lib/pmFind";
 import { useStore } from "../lib/store";
 import type { AssetMeta } from "../lib/types";
 import { dragHandle } from "../hdoc/draghandle";
@@ -89,6 +90,7 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
     let saveChain: Promise<void> = Promise.resolve();
 
     const plugins = [
+      findPlugin(),
       // The slash menu must precede every keymap: while it is open it owns
       // Enter / arrows / Backspace, which the keymaps would otherwise consume.
       slashMenu(),
@@ -301,6 +303,15 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
         .getState()
         .setEditorHandle({ undo: doUndo, redo: doRedo, flush });
       useStore.getState().setSaveState("saved");
+      useStore.getState().setFindHandle({
+        search: (q) =>
+          Promise.resolve(view ? runFind(view, q) : { count: 0, active: 0 }),
+        step: (d) =>
+          Promise.resolve(view ? stepFind(view, d) : { count: 0, active: 0 }),
+        clear: () => {
+          if (view) clearFind(view);
+        },
+      });
     })();
 
     return () => {
@@ -310,6 +321,7 @@ export default function HdocEditor({ asset }: { asset: AssetMeta }) {
       if (saveTimer) clearTimeout(saveTimer);
       useStore.getState().setEditorHandle(null);
       useStore.getState().setSaveState(null);
+      useStore.getState().setFindHandle(null);
       pmViewRef.current = null;
       const dying = view;
       // An unresolved conflict froze autosave, so the flush below will bail —

@@ -1,5 +1,5 @@
 import { ShieldCheck, ShieldOff } from "lucide-react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { api, assetUrl } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import type { TFn } from "../lib/i18n";
@@ -48,7 +48,9 @@ export default function Viewer() {
       }
       if (e.key === "Escape") {
         e.preventDefault();
-        st.closeViewer();
+        // Ladder: an open find bar absorbs the first Escape
+        if (st.findOpen) st.closeFind();
+        else st.closeViewer();
       } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         st.viewerStep(e.key === "ArrowDown" ? 1 : -1);
@@ -213,6 +215,7 @@ function PreviewPane({
 }) {
   // CSP block count reported by the script injected into the sandbox
   const [blocked, setBlocked] = useState(0);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     const on = (e: MessageEvent) => {
@@ -223,9 +226,61 @@ function PreviewPane({
     return () => window.removeEventListener("message", on);
   }, []);
 
+  // In-page find: proxy the FindBar's commands into the sandboxed document
+  // (the injected reporter script runs them and posts the counts back).
+  useEffect(() => {
+    interface FindReply {
+      count: number;
+      active: number;
+    }
+    // FIFO waiters: the injected runtime answers strictly in request order,
+    // so the oldest waiter owns the next reply. (A single slot would mispair
+    // replies whenever a search and a step overlap within the timeout.)
+    const waiters: ((r: FindReply) => void)[] = [];
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data as {
+        __harbly?: string;
+        count?: number;
+        active?: number;
+      } | null;
+      if (d?.__harbly !== "findResult") return;
+      waiters.shift()?.({ count: d.count ?? 0, active: d.active ?? 0 });
+    };
+    window.addEventListener("message", onMsg);
+    const send = (msg: Record<string, unknown>) =>
+      iframeRef.current?.contentWindow?.postMessage(
+        { __harbly: "find", ...msg },
+        "*",
+      );
+    const ask = (msg: Record<string, unknown>): Promise<FindReply> =>
+      new Promise((resolve) => {
+        waiters.push(resolve);
+        send(msg);
+        // The page may be mid-navigation or predate the runtime: fall back to
+        // "no matches" instead of hanging the bar.
+        setTimeout(() => {
+          const i = waiters.indexOf(resolve);
+          if (i !== -1) {
+            waiters.splice(i, 1);
+            resolve({ count: 0, active: 0 });
+          }
+        }, 600);
+      });
+    useStore.getState().setFindHandle({
+      search: (q) => ask({ op: "search", q }),
+      step: (d) => ask({ op: "step", delta: d }),
+      clear: () => send({ op: "clear" }),
+    });
+    return () => {
+      window.removeEventListener("message", onMsg);
+      useStore.getState().setFindHandle(null);
+    };
+  }, []);
+
   return (
     <>
       <iframe
+        ref={iframeRef}
         src={`${assetUrl(a.id)}${allowToken ? `?allow=${allowToken}` : ""}`}
         sandbox="allow-scripts allow-same-origin"
         className={`absolute inset-0 border-0 ${dragging ? "pointer-events-none" : ""}`}

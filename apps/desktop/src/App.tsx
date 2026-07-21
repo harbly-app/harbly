@@ -10,6 +10,7 @@ import Onboarding from "./components/Onboarding";
 import TitleBar from "./components/TitleBar";
 import Sidebar from "./components/Sidebar";
 import AssetGrid from "./components/AssetGrid";
+import FindBar from "./components/FindBar";
 import Viewer from "./components/Viewer";
 import CommandPalette from "./components/CommandPalette";
 import Modals from "./components/Modals";
@@ -216,10 +217,12 @@ export default function App() {
       if (d.key === "j") st.toggleAi();
       else if (d.key === "k") st.setPalette(true);
       else if (d.key === "b") st.toggleSidebar();
+      else if (d.key === "f") st.openFind();
       else if (d.key === "escape") {
         // Mirror the in-app Escape ladder: overlays first, then the viewer
         if (st.modal) st.setModal(null);
         else if (st.paletteOpen) st.setPalette(false);
+        else if (st.findOpen) st.closeFind();
         else st.closeViewer();
       } else if (d.key === "arrowup" || d.key === "arrowdown") {
         if (!st.modal && !st.paletteOpen)
@@ -249,6 +252,12 @@ export default function App() {
         // the title-bar indicator flips to "saved" when it lands.
         e.preventDefault();
         void useStore.getState().editorHandle?.flush();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        // ⌘F = in-document find when a surface is open; library search in the grid
+        e.preventDefault();
+        const st = useStore.getState();
+        if (st.findHandle) st.openFind();
+        else st.setPalette(true);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -280,6 +289,7 @@ export default function App() {
         {/* `relative` anchors the AI panel's narrow-window overlay mode */}
         <div className="relative flex min-w-0 flex-1">
           {viewerOpen ? <Viewer /> : <AssetGrid />}
+          <FindBar />
           {aiOpen && (
             <Suspense
               fallback={

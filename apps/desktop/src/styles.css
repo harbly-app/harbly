@@ -659,3 +659,14 @@ h-figure .hd-fields {
 .hdoc-editor h-doc[layout="docs"] {
   padding-left: 28px;
 }
+
+/* In-document find (⌘F): match highlights in the ProseMirror editors. The
+   sandboxed preview uses ::highlight() from the injected runtime instead. */
+.pm-find-match {
+  background: rgba(250, 204, 21, 0.45);
+  border-radius: 2px;
+}
+.pm-find-match.pm-find-active {
+  background: rgba(245, 158, 11, 0.85);
+  color: #1a1523;
+}

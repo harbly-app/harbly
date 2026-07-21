@@ -1,6 +1,8 @@
 import { Crepe } from "@milkdown/crepe";
+import { editorViewCtx } from "@milkdown/kit/core";
 import { redoCommand, undoCommand } from "@milkdown/kit/plugin/history";
 import { $prose, callCommand } from "@milkdown/kit/utils";
+import type { EditorView } from "prosemirror-view";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 import { RefreshCw } from "lucide-react";
@@ -9,6 +11,7 @@ import { imageToDataUrl } from "../hdoc/image";
 import { api, relAssetUrl } from "../lib/api";
 import { makeT } from "../lib/i18n";
 import { mdNativeImagePastePlugin, stripDoomedImageRefs } from "../lib/mdpaste";
+import { clearFind, findPlugin, runFind, stepFind } from "../lib/pmFind";
 import { useStore } from "../lib/store";
 import type { AssetMeta } from "../lib/types";
 
@@ -101,6 +104,7 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
       // Registered after Crepe's clipboard/upload plugins, so it only sees the
       // pastes they decline: raw macOS clipboard bitmaps invisible to JS.
       c.editor.use($prose(() => mdNativeImagePastePlugin()));
+      c.editor.use($prose(() => findPlugin()));
       c.on((listener) =>
         listener.markdownUpdated((_ctx, markdown) => {
           if (!ready.v || markdown === lastSavedBody.v) return;
@@ -252,6 +256,32 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
       ready.v = true;
       useStore.getState().setEditorHandle({ undo, redo, flush });
       useStore.getState().setSaveState("saved");
+      // Crepe wraps ProseMirror; borrow its live view for the find commands
+      const pmView = (): EditorView | null => {
+        let v: EditorView | null = null;
+        try {
+          crepe?.editor.action((ctx) => {
+            v = ctx.get(editorViewCtx);
+          });
+        } catch {
+          /* editor tearing down */
+        }
+        return v;
+      };
+      useStore.getState().setFindHandle({
+        search: (q) => {
+          const v = pmView();
+          return Promise.resolve(v ? runFind(v, q) : { count: 0, active: 0 });
+        },
+        step: (d) => {
+          const v = pmView();
+          return Promise.resolve(v ? stepFind(v, d) : { count: 0, active: 0 });
+        },
+        clear: () => {
+          const v = pmView();
+          if (v) clearFind(v);
+        },
+      });
     })();
 
     return () => {
@@ -261,6 +291,7 @@ export default function MarkdownEditor({ asset }: { asset: AssetMeta }) {
       if (saveTimer) clearTimeout(saveTimer);
       useStore.getState().setEditorHandle(null);
       useStore.getState().setSaveState(null);
+      useStore.getState().setFindHandle(null);
       const dying = crepe;
       // An unresolved conflict froze autosave, so the flush below will bail —
       // and the buffer is about to die with the editor. Rescue the local
